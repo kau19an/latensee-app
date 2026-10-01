@@ -5,7 +5,7 @@ Seu objetivo principal é obter a longitude e latitude do usuário e, com base n
 
 ## 🤔️ Como instalar?
 > [!WARNING]
-> Presume-se que você já tenha o [Git](https://git-scm.com/install/windows) e [Node.js](https://nodejs.org/pt-br/download/current) instalados no seu computador para prosseguir com as instruções abaixo.
+> Presume-se que você já tenha o <img src="https://raw.githubusercontent.com/devicons/devicon/refs/heads/master/icons/git/git-plain.svg" width="12px" /> [Git](https://git-scm.com/install/windows) e <img src="https://github.com/devicons/devicon/raw/refs/heads/master/icons/nodejs/nodejs-plain.svg" width="12px" /> [Node.js](https://nodejs.org/pt-br/download/current) instalados no seu computador para prosseguir com as instruções abaixo.
 1. Abra o terminal do seu sistema operacional dentro de alguma pasta no seu computador e clone este repositório executando o comando `git clone https://github.com/kau19an/latensee-app.git` neste diretório.
 2. Dentro da pasta `latensee-app` clonada, execute o comando `npm install` para instalar todos os pacotes utilizados pelo aplicativo.
 3. Uma vez concluído, basta executar o comando `npx expo start` e apontar a câmera do seu celular para o QR Code gerado no terminal, abrindo assim o seu Expo Go (disponível para [Android](https://play.google.com/store/apps/details?id=host.exp.exponent&hl=pt_BR) e [iOS](https://apps.apple.com/br/app/expo-go/id982107779)).
