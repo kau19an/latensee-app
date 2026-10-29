@@ -10,7 +10,9 @@ if (!__DEV__ && !API_BASE_URL.startsWith("https://")) {
 
 export const API_PATHS = {
   health: "/api/v1/health",
+  models: "/api/v1/models",
+  nearbyForecast: "/api/v1/forecasts/nearby",
 } as const;
 
-// Tempo para a hospedagem da API acordar
-export const HEALTH_TIMEOUT_MS = 60_000;
+export const HEALTH_TIMEOUT_MS = 60_000; // Tempo para a hospedagem da API acordar
+export const REQUEST_TIMEOUT_MS = 30_000;

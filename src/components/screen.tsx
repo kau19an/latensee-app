@@ -1,28 +1,39 @@
 import type { ReactNode } from "react";
-import { ScrollView, StyleSheet, Text } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppText } from "@/components/app-text";
 import { Spacing } from "@/constants/theme";
 import { useThemeColors } from "@/hooks/use-theme-colors";
 
 interface ScreenProps {
-  title: string;
+  title?: string;
+  subtitle?: string;
   children: ReactNode;
 }
 
-export function Screen({ title, children }: ScreenProps) {
+export function Screen({ title, subtitle, children }: ScreenProps) {
   const colors = useThemeColors();
 
   return (
     <SafeAreaView
-      edges={["top"]}
+      edges={title ? ["top"] : ["bottom"]}
       collapsable={false}
       style={[styles.container, { backgroundColor: colors.background }]}
     >
       <ScrollView contentContainerStyle={styles.content}>
-        <Text accessibilityRole="header" style={[styles.title, { color: colors.text }]}>
-          {title}
-        </Text>
+        {title ? (
+          <View style={styles.header}>
+            <AppText variant="title" accessibilityRole="header">
+              {title}
+            </AppText>
+            {subtitle ? (
+              <AppText variant="caption" tone="muted">
+                {subtitle}
+              </AppText>
+            ) : null}
+          </View>
+        ) : null}
         {children}
       </ScrollView>
     </SafeAreaView>
@@ -34,11 +45,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: Spacing.lg,
-    gap: Spacing.lg,
+    flexGrow: 1,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.lg,
+    gap: Spacing.md,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
+  header: {
+    gap: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
 });

@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { BOOT_TEXT } from "@/constants/boot-content";
 import { Spacing } from "@/constants/theme";
+import { useApiStatusColor } from "@/hooks/use-api-status-color";
 import { useThemeColors } from "@/hooks/use-theme-colors";
 import type { ApiHealthStatus } from "@/types/api";
 
@@ -11,12 +12,7 @@ interface ApiStatusBadgeProps {
 
 export function ApiStatusBadge({ status }: ApiStatusBadgeProps) {
   const colors = useThemeColors();
-
-  const dotColors: Record<ApiHealthStatus, string> = {
-    checking: colors.warning,
-    active: colors.success,
-    unavailable: colors.danger,
-  };
+  const dotColor = useApiStatusColor(status);
 
   const label = `${BOOT_TEXT.statusPrefix}: ${BOOT_TEXT.statusLabels[status]}`;
 
@@ -31,7 +27,7 @@ export function ApiStatusBadge({ status }: ApiStatusBadgeProps) {
       <View
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={[styles.dot, { backgroundColor: dotColors[status] }]}
+        style={[styles.dot, { backgroundColor: dotColor }]}
       />
       <Text style={[styles.text, { color: colors.text }]}>{label}</Text>
     </View>

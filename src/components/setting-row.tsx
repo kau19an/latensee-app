@@ -23,7 +23,7 @@ export function SettingRow({
   const titleColor = disabled ? colors.textSecondary : colors.text;
 
   return (
-    <View style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={styles.row}>
       <View style={styles.texts}>
         <View style={styles.titleLine}>
           <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
@@ -56,8 +56,6 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     minHeight: MIN_TOUCH_TARGET,
     padding: Spacing.md,
-    borderRadius: 12,
-    borderWidth: 1,
   },
   texts: {
     flex: 1,

@@ -1,17 +1,16 @@
 import { createContext, useState, type ReactNode } from "react";
-import { Appearance } from "react-native";
 
-import { applyThemeOverride } from "@/services/appearance";
+import { applyThemeMode } from "@/services/appearance";
 import { loadSettings, saveSettings } from "@/services/settings-storage";
-import type { Settings, ThemeScheme, ThemeSettings } from "@/types/settings";
+import type { Settings, ThemeMode } from "@/types/settings";
 
 const initialSettings = loadSettings();
-applyThemeOverride(initialSettings.theme);
+applyThemeMode(initialSettings.themeMode);
 
 interface SettingsContextValue {
   settings: Settings;
-  setUseDeviceTheme: (useDeviceTheme: boolean) => void;
-  setManualScheme: (scheme: ThemeScheme) => void;
+  setThemeMode: (mode: ThemeMode) => void;
+  setModelId: (modelId: string) => void;
 }
 
 export const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -19,28 +18,22 @@ export const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(initialSettings);
 
-  function updateTheme(theme: ThemeSettings) {
-    const next: Settings = { ...settings, theme };
+  function update(next: Settings) {
     setSettings(next);
     saveSettings(next);
-    applyThemeOverride(theme);
   }
 
-  function setUseDeviceTheme(useDeviceTheme: boolean) {
-    const deviceScheme: ThemeScheme = Appearance.getColorScheme() === "dark" ? "dark" : "light";
-
-    updateTheme({
-      useDeviceTheme,
-      manualScheme: useDeviceTheme ? settings.theme.manualScheme : deviceScheme,
-    });
+  function setThemeMode(themeMode: ThemeMode) {
+    update({ ...settings, themeMode });
+    applyThemeMode(themeMode);
   }
 
-  function setManualScheme(manualScheme: ThemeScheme) {
-    updateTheme({ useDeviceTheme: false, manualScheme });
+  function setModelId(modelId: string) {
+    update({ ...settings, modelId });
   }
 
   return (
-    <SettingsContext.Provider value={{ settings, setUseDeviceTheme, setManualScheme }}>
+    <SettingsContext.Provider value={{ settings, setThemeMode, setModelId }}>
       {children}
     </SettingsContext.Provider>
   );

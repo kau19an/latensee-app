@@ -4,11 +4,13 @@ export type ApiErrorKind = "timeout" | "network" | "http" | "invalid" | "aborted
 
 export class ApiError extends Error {
   kind: ApiErrorKind;
+  status: number | undefined;
 
-  constructor(kind: ApiErrorKind, message: string) {
+  constructor(kind: ApiErrorKind, message: string, status?: number) {
     super(message);
     this.name = "ApiError";
     this.kind = kind;
+    this.status = status;
   }
 }
 
@@ -43,7 +45,7 @@ export async function apiGet(
     });
 
     if (!response.ok) {
-      throw new ApiError("http", `Request failed with status ${response.status}.`);
+      throw new ApiError("http", `Request failed with status ${response.status}.`, response.status);
     }
 
     try {

@@ -1,11 +1,7 @@
-export type ThemeScheme = "light" | "dark";
-
-export interface ThemeSettings {
-  useDeviceTheme: boolean;
-  manualScheme: ThemeScheme;
-}
+export type ThemeMode = "auto" | "light" | "dark";
 
 export interface Settings {
   version: number;
-  theme: ThemeSettings;
+  themeMode: ThemeMode;
+  modelId: string;
 }

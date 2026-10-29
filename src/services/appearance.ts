@@ -1,7 +1,7 @@
 import { Appearance } from "react-native";
 
-import type { ThemeSettings } from "@/types/settings";
+import type { ThemeMode } from "@/types/settings";
 
-export function applyThemeOverride(theme: ThemeSettings): void {
-  Appearance.setColorScheme(theme.useDeviceTheme ? "unspecified" : theme.manualScheme);
+export function applyThemeMode(mode: ThemeMode): void {
+  Appearance.setColorScheme(mode === "auto" ? "unspecified" : mode);
 }

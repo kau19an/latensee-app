@@ -1,53 +1,30 @@
-import { StyleSheet, Switch, Text } from "react-native";
-
+import { ApiStatusLine } from "@/components/api-status-line";
+import { DevInfo } from "@/components/dev-info";
+import { MenuRow } from "@/components/menu-row";
 import { Screen } from "@/components/screen";
-import { SelectField } from "@/components/select-field";
-import { SettingRow } from "@/components/setting-row";
+import { SettingsSection } from "@/components/settings-section";
 import { SETTINGS_TEXT, THEME_OPTIONS } from "@/constants/app-content";
-import { Spacing } from "@/constants/theme";
+import { useApiHealth } from "@/hooks/use-api-health";
 import { useSettings } from "@/hooks/use-settings";
-import { useThemeColors } from "@/hooks/use-theme-colors";
 
 export default function SettingsScreen() {
-  const colors = useThemeColors();
-  const { settings, setUseDeviceTheme, setManualScheme } = useSettings();
-  const { useDeviceTheme, manualScheme } = settings.theme;
+  const { settings, setThemeMode } = useSettings();
+  const { status } = useApiHealth();
 
   return (
     <Screen title={SETTINGS_TEXT.title}>
-      <Text
-        accessibilityRole="header"
-        style={[styles.sectionTitle, { color: colors.textSecondary }]}
-      >
-        {SETTINGS_TEXT.appearanceSection}
-      </Text>
-
-      <SettingRow title={SETTINGS_TEXT.deviceTheme.title}>
-        <Switch
-          value={useDeviceTheme}
-          onValueChange={setUseDeviceTheme}
-          trackColor={{ true: colors.primary }}
-          accessibilityLabel={SETTINGS_TEXT.deviceTheme.title}
-        />
-      </SettingRow>
-
-      {!useDeviceTheme && (
-        <SelectField
-          label={SETTINGS_TEXT.manualTheme.label}
+      <SettingsSection title={SETTINGS_TEXT.appearanceSection}>
+        <MenuRow
+          label={SETTINGS_TEXT.theme.label}
           options={THEME_OPTIONS}
-          value={manualScheme}
-          onChange={setManualScheme}
+          value={settings.themeMode}
+          onChange={setThemeMode}
         />
-      )}
+      </SettingsSection>
+
+      <DevInfo title={SETTINGS_TEXT.devInfoTitle}>
+        <ApiStatusLine status={status} />
+      </DevInfo>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    marginBottom: -Spacing.sm,
-  },
-});
