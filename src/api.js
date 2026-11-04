@@ -1,13 +1,32 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // Ajuste BASE e os caminhos conforme https://internet-quality-api.onrender.com/docs
 const BASE = 'https://internet-quality-api.onrender.com';
 
+// De onde veio o último dado: 'api' | 'cache' (última previsão salva) | 'mock' (exemplo)
+let info = { fonte: 'api', quando: null };
+export const infoDados = () => info;
+const hoje = () => new Date().toISOString().slice(0, 10);
+
 async function get(path, fallback) {
+  const chave = `cache:${hoje()}:${path}`; // cache vale só para o dia (a previsão muda)
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000); // Render free pode demorar a acordar
   try {
-    const r = await fetch(BASE + path);
+    const r = await fetch(BASE + path, { signal: ctrl.signal });
     if (!r.ok) throw new Error(r.status);
-    return await r.json();
+    const json = await r.json();
+    info = { fonte: 'api', quando: Date.now() };
+    AsyncStorage.setItem(chave, JSON.stringify({ t: Date.now(), json })).catch(() => {});
+    return json;
   } catch (e) {
-    return fallback; // mock quando a API estiver fora/dormindo (Render free)
+    try {
+      const salvo = await AsyncStorage.getItem(chave);
+      if (salvo) { const { t, json } = JSON.parse(salvo); info = { fonte: 'cache', quando: t }; return json; }
+    } catch (e2) { /* ignora */ }
+    info = { fonte: 'mock', quando: null };
+    return fallback; // mock quando a API estiver fora/dormindo e não houver cache
+  } finally {
+    clearTimeout(timer);
   }
 }
 

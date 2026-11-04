@@ -5,9 +5,19 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.latensee.app",
+      "buildNumber": "1",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.latensee.app",
+      "versionCode": 1
+    },
     "plugins": [
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "expo-notifications"
     ]
   }
 }
