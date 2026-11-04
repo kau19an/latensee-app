@@ -58,6 +58,14 @@ export const ATIVIDADES = [
   { nome: 'Navegação',     icon: 'globe',        ok: ['Boa', 'Regular', 'Instável'] },
   { nome: 'Envio de arquivos', icon: 'cloud-upload', ok: ['Boa', 'Regular'] },
 ];
+// Melhor horário para uma atividade: menor latência entre os horários que servem para ela
+export function melhorHorario(lista, nomeAtividade, aPartirDe = 0) {
+  const a = ATIVIDADES.find((x) => x.nome === nomeAtividade);
+  if (!a || !lista) return null;
+  return lista
+    .filter((p) => parseInt(p.hora, 10) >= aPartirDe && a.ok.includes(classificar(p)))
+    .sort((x, y) => x.latencia - y.latencia)[0] || null;
+}
 // RNF07 — glossário
 export const GLOSSARIO = {
   'Latência': 'Tempo que a informação leva para ir e voltar (RTT). Quanto menor, melhor.',

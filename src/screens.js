@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Switch, Pressable, Platform, AccessibilityInfo } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Circle as MapCircle } from 'react-native-maps';
-import { Screen, H, P, Card, Btn, Row, Badge, Metric, Chips, DayPicker, DIAS, ForecastChart } from './ui';
-import { useTheme, STATUS, ATIVIDADES, GLOSSARIO, classificar } from './theme';
-import { getPrevisao, getPrevisaoDia, getServidores } from './api';
+import { Screen, H, TituloTela, P, Card, Btn, Row, Badge, AvisoDados, AvisoRota, Metric, Chips, DayPicker, DIAS, ForecastChart, useBase } from './ui';
+import { useTheme, STATUS, ATIVIDADES, GLOSSARIO, classificar, melhorHorario } from './theme';
+import { getPrevisao, getPrevisaoDia, getServidores, infoDados } from './api';
+import { analisarRota, lerAvisoRota } from './rotas';
+import { PREFS_PADRAO, lerPrefs, salvarPrefs, pedirPermissao, reagendarAlertas } from './alertas';
 
 /* ---------- ONBOARDING (5 passos, tudo centralizado) ---------- */
 const PASSOS = [
@@ -48,18 +50,27 @@ export function Painel({ navigation }) {
   const [dia, setDia] = useState(0);
   const [sel, setSel] = useState(0);
   const [d, setD] = useState(null);
+  const [info, setInfo] = useState(null);
+  const [lista, setLista] = useState(null);   // previsão do dia inteiro (melhor horário)
+  const [ativ, setAtiv] = useState(0);
   const PER = periodos(dia);
+  useEffect(() => {
+    setLista(null);
+    getPrevisaoDia(dia).then(setLista);
+  }, [dia]);
+  const melhor = melhorHorario(lista, ATIVIDADES[ativ].nome, dia === 0 ? new Date().getHours() : 0);
   useEffect(() => {
     setD(null);
     getPrevisao(PER[sel][1], dia).then((r) => {
-      setD(r);
+      setD(r); setInfo(infoDados());
       AccessibilityInfo.announceForAccessibility(`Previsão atualizada: conexão ${classificar(r)}`); // RNF08
     });
   }, [sel, dia]);
   const status = d ? classificar(d) : null;
   return (
     <Screen>
-      <H>Sua conexão</H>
+      <TituloTela>Sua conexão</TituloTela>
+      <AvisoDados info={info} />
       <DayPicker dia={dia} onDia={setDia} />
       <Chips items={PER.map(([n]) => n)} sel={sel} onSel={setSel} center label="Período" />
       {!d ? <P style={{ textAlign: 'center' }}>Carregando previsão…</P> : (
@@ -68,7 +79,7 @@ export function Painel({ navigation }) {
             <Text style={{ color: c.sub, fontSize: 14 }}>{DIAS[dia]} · {PER[sel][0]}</Text>
             <Badge status={status} big center />
             <P style={{ textAlign: 'center' }}>{STATUS[status].desc}</P>
-            <View style={{ flexDirection: 'row', gap: 8, alignSelf: 'stretch' }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
               <Metric label="Latência" value={d.latencia} unit="ms" center />
               <Metric label="Jitter" value={d.jitter} unit="ms" center />
               <Metric label="Perda" value={d.perda} unit="%" center />
@@ -79,6 +90,20 @@ export function Painel({ navigation }) {
             const ok = a.ok.includes(status);
             return <Row key={a.nome} icon={a.icon} label={a.nome} value={ok ? 'Recomendado' : 'Não recomendado'} />;
           })}
+          <H>Melhor horário para...</H>
+          <Chips items={ATIVIDADES.map((a) => a.nome)} sel={ativ} onSel={setAtiv} scroll label="Atividade" />
+          <Card style={{ alignItems: 'center' }}>
+            {!lista ? <P>Carregando…</P> : melhor ? (
+              <>
+                <Text style={{ color: c.sub, fontSize: 14 }}>{DIAS[dia]} · {ATIVIDADES[ativ].nome}</Text>
+                <Text accessibilityLabel={`Melhor horário: ${melhor.hora}`} style={{ color: c.text, fontSize: 32, fontWeight: '700' }}>{melhor.hora}</Text>
+                <Badge status={classificar(melhor)} center />
+                <P style={{ color: c.sub }}>Latência prevista de {melhor.latencia} ms.</P>
+              </>
+            ) : (
+              <P style={{ textAlign: 'center' }}>Nenhum horário bom para {ATIVIDADES[ativ].nome.toLowerCase()} {dia === 0 ? 'no resto de hoje' : 'neste dia'}.</P>
+            )}
+          </Card>
           <Btn label="Ver detalhes" icon="information-circle" onPress={() => navigation.navigate('Diagnostico', { d, status })} />
         </>
       )}
@@ -93,9 +118,10 @@ export function Velocidade({ navigation }) {
   const [h, setH] = useState(null);
   const [sel, setSel] = useState(dia === 0 ? new Date().getHours() : 12);
   const [lista, setLista] = useState(false);
+  const [info, setInfo] = useState(null);
   useEffect(() => {
     setH(null);
-    getPrevisaoDia(dia).then((r) => { setH(r); setSel(dia === 0 ? Math.min(new Date().getHours(), r.length - 1) : 12); });
+    getPrevisaoDia(dia).then((r) => { setH(r); setInfo(infoDados()); setSel(dia === 0 ? Math.min(new Date().getHours(), r.length - 1) : 12); });
   }, [dia]);
   const x = h && h[sel];
   const st = x ? classificar(x) : null;
@@ -103,7 +129,8 @@ export function Velocidade({ navigation }) {
   const ruins = h ? h.filter((p) => classificar(p) === 'Instável') : [];
   return (
     <Screen>
-      <H>Previsão de velocidade</H>
+      <TituloTela>Previsão de velocidade</TituloTela>
+      <AvisoDados info={info} />
       <DayPicker dia={dia} onDia={setDia} />
       {!h ? <P>Carregando previsão…</P> : (
         <>
@@ -123,7 +150,7 @@ export function Velocidade({ navigation }) {
             <Card style={{ alignItems: 'center' }}>
               <Text style={{ color: c.sub, fontSize: 14 }}>{DIAS[dia]} às {x.hora}</Text>
               <Badge status={st} center />
-              <View style={{ flexDirection: 'row', gap: 8, alignSelf: 'stretch' }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
                 <Metric label="Latência" value={x.latencia} unit="ms" center />
                 <Metric label="Jitter" value={x.jitter} unit="ms" center />
                 <Metric label="Perda" value={x.perda} unit="%" center />
@@ -187,14 +214,23 @@ export function Mapa({ navigation }) {
   const [s, setS] = useState([]);
   const [sel, setSel] = useState(0);
   const mapRef = useRef(null);
-  useEffect(() => { getServidores().then(setS); }, []);
+  const [avisos, setAvisos] = useState({});
+  useEffect(() => {
+    getServidores().then(async (lista) => {
+      setS(lista);
+      if (infoDados().fonte !== 'api') return; // só aprende rota com medição real
+      const r = {};
+      for (const x of lista) r[x.id] = await analisarRota(x);
+      setAvisos(r);
+    });
+  }, []);
   const noMapa = s.filter((x) => x.lat != null);
   const fora = s.filter((x) => x.lat == null);
   const p = noMapa[sel];
   const focar = (k) => { setSel(k); mapRef.current?.animateToRegion(regiao(noMapa[k]), 600); };
   return (
     <Screen>
-      <H>Pontos de medição</H>
+      <TituloTela>Pontos de medição</TituloTela>
       <P style={{ color: c.sub }}>Onde a API testa a sua conexão.</P>
       {noMapa.length > 0 && (
         <>
@@ -209,6 +245,7 @@ export function Mapa({ navigation }) {
               </View>
               <P style={{ color: c.sub }}>{p.cidade ? `${p.cidade} · ` : ''}{p.lat.toFixed(5)}, {p.lon.toFixed(5)}</P>
               <Badge status={classificar(p)} />
+              <AvisoRota aviso={avisos[p.id]} />
               <Btn label="Detalhes do servidor" icon="server" onPress={() => navigation.navigate('Servidor', { x: p })} />
             </Card>
           )}
@@ -218,8 +255,11 @@ export function Mapa({ navigation }) {
         <>
           <H>Outras rotas monitoradas</H>
           {fora.map((x) => (
-            <Row key={x.id} icon="server" label={`${x.nome} — ${x.rota}`} value={classificar(x)}
+            <React.Fragment key={x.id}>
+            <AvisoRota aviso={avisos[x.id]} />
+            <Row icon="server" label={`${x.nome} — ${x.rota}`} value={classificar(x)}
               onPress={() => navigation.navigate('Servidor', { x })} />
+            </React.Fragment>
           ))}
         </>
       )}
@@ -228,21 +268,37 @@ export function Mapa({ navigation }) {
 }
 
 /* ---------- ALERTAS ---------- */
+const MSG_ALERTA = {
+  '-1': 'Sem previsão do servidor agora. Tentamos de novo ao abrir o app.',
+  '-2': 'Alertas desligados.',
+  '-3': 'Notificações bloqueadas. Ative nas configurações do celular.',
+  0: 'Nenhum horário ruim previsto. Sem avisos por enquanto.',
+};
 export function Alertas() {
   const { c } = useTheme();
-  const [on, setOn] = useState({ risco: true, falha: true });
+  const [on, setOn] = useState(PREFS_PADRAO);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { lerPrefs().then(setOn); }, []);
+  const mudar = async (k, v) => {
+    const novo = { ...on, [k]: v };
+    setOn(novo); await salvarPrefs(novo);
+    if (v) await pedirPermissao();
+    const n = await reagendarAlertas();
+    setMsg(n > 0 ? `${n} aviso(s) agendado(s) para hoje e amanhã.` : MSG_ALERTA[n]);
+  };
   const Sw = ({ k, label }) => (
-    <View style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-      <P>{label}</P>
-      <Switch value={on[k]} onValueChange={(v) => setOn({ ...on, [k]: v })} accessibilityLabel={label}
+    <View style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <P style={{ flex: 1 }}>{label}</P>
+      <Switch value={on[k]} onValueChange={(v) => mudar(k, v)} accessibilityLabel={label}
         trackColor={{ true: c.primary, false: c.border }} thumbColor="#FFFFFF" />
     </View>
   );
   return (
     <Screen>
-      <H>Alertas</H>
+      <TituloTela>Alertas</TituloTela>
       <Card><Sw k="risco" label="Avisar quando estiver Regular" /><Sw k="falha" label="Avisar quando estiver Instável" /></Card>
-      <P style={{ color: c.sub }}>Só avisamos após 2–3 medições seguidas, para evitar alarme falso.</P>
+      <P style={{ color: c.sub }}>Só avisamos se a conexão ficar ruim por 2 horas seguidas ou mais, para evitar alarme falso. O aviso chega 30 minutos antes.</P>
+      {msg ? <P accessibilityLiveRegion="polite">{msg}</P> : null}
     </Screen>
   );
 }
@@ -251,7 +307,7 @@ export function Alertas() {
 export function Privacidade() {
   return (
     <Screen>
-      <H>VPN e privacidade</H>
+      <TituloTela>VPN e privacidade</TituloTela>
       <Card>
         <P>• Não coletamos dados pessoais.</P><P>• Não rastreamos sua localização.</P>
         <P>• Usar VPN pode aumentar a latência: o caminho fica mais longo, mesmo sem defeito na rede.</P>
@@ -264,18 +320,19 @@ export function Privacidade() {
 const TEMAS = [['claro', 'Claro', 'sunny'], ['escuro', 'Escuro', 'moon'], ['sistema', 'Automático', 'phone-portrait']];
 export function Configuracoes({ navigation, onReset }) {
   const { c, pref, setPref } = useTheme();
+  const baseTema = useBase(100);
   return (
     <Screen>
-      <H>Configurações</H>
+      <TituloTela>Configurações</TituloTela>
       <Card>
         <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Aparência</Text>
-        <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', gap: 8 }}>
+        <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {TEMAS.map(([k, label, ic]) => {
             const ativo = pref === k;
             return (
               <Pressable key={k} onPress={() => setPref(k)} accessibilityRole="radio" accessibilityState={{ checked: ativo }}
                 accessibilityLabel={`Tema ${label}`}
-                style={{ flex: 1, minHeight: 72, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 4,
+                style={{ flexGrow: 1, flexBasis: baseTema, minHeight: 72, padding: 8, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 4,
                   backgroundColor: ativo ? c.primary : c.bg, borderWidth: 2, borderColor: ativo ? c.primary : c.grid }}>
                 <Ionicons name={ic} size={24} color={ativo ? c.onPrimary : c.accent} />
                 <Text style={{ color: ativo ? c.onPrimary : c.text, fontWeight: '700' }}>{label}</Text>
@@ -315,7 +372,7 @@ export function Diagnostico({ route }) {
     : ['Aproxime-se do roteador ou use cabo.', 'Pause downloads grandes.', 'Reinicie o roteador se continuar assim.'];
   return (
     <Screen>
-      <H>Diagnóstico</H><Badge status={status} />
+      <TituloTela>Diagnóstico</TituloTela><Badge status={status} />
       <Card><P>Latência {d.latencia} ms · Jitter {d.jitter} ms · Perda {d.perda}%</P></Card>
       <H>O que fazer</H>{dicas.map((t) => <P key={t}>• {t}</P>)}
       <H>Termos</H>
@@ -328,9 +385,12 @@ export function Diagnostico({ route }) {
 export function Servidor({ route }) {
   const { c } = useTheme();
   const x = route.params.x;
+  const [aviso, setAviso] = useState(null);
+  useEffect(() => { lerAvisoRota(x.id).then(setAviso); }, [x.id]);
   return (
     <Screen>
       <H>{x.nome}</H><Badge status={classificar(x)} />
+      <AvisoRota aviso={aviso} />
       {x.lat != null && (
         <>
           <Mapinha pontos={[x]} foco={x} height={200} interativo={false} />
@@ -351,7 +411,7 @@ export function Ajuda() {
   const { c } = useTheme();
   return (
     <Screen>
-      <H>Ajuda</H>
+      <TituloTela>Ajuda</TituloTela>
       {Object.entries(GLOSSARIO).map(([k, v]) => <Card key={k}><Text style={{ fontWeight: '700', color: c.text }}>{k}</Text><P>{v}</P></Card>)}
       <Card><Text style={{ fontWeight: '700', color: c.text }}>Boa / Regular / Instável</Text>
         <P>Boa: perda &lt; 0,5% e jitter &lt; 20 ms. Regular: perda 0,5–2% ou jitter 20–50 ms. Instável: acima disso.</P></Card>
