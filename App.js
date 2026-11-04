@@ -12,6 +12,7 @@ import { ThemeProvider, useTheme } from './src/theme';
 import { reagendarAlertas } from './src/alertas';
 import { IOS, PlataformaProvider, useGlass } from './src/plataforma';
 import { navRef, StatusAgoraProvider, StatusAcessorio, ACESSORIO_DISPONIVEL } from './src/statusAgora';
+import { PreferenciasProvider, usePreferencias } from './src/preferencias';
 
 const Stack = createNativeStackNavigator();
 // iOS usa a barra nativa do sistema; Android continua com a barra atual
@@ -60,7 +61,9 @@ function Navegacao() {
   const [ready, setReady] = useState(false);
   const [seen, setSeen] = useState(false);
   useEffect(() => { AsyncStorage.getItem('onboarded').then((v) => { setSeen(v === '1'); setReady(true); }); }, []);
-  useEffect(() => { if (ready) reagendarAlertas().catch(() => {}); }, [ready]); // renova avisos ao abrir
+  const { modelo, regiao, pronto } = usePreferencias();
+  // renova avisos ao abrir e sempre que o modelo ou a região mudarem
+  useEffect(() => { if (ready && pronto) reagendarAlertas().catch(() => {}); }, [ready, pronto, modelo, regiao.id]);
   if (!ready) return null;
   const base = c.dark ? DarkTheme : DefaultTheme;
   const navTheme = { ...base, dark: c.dark, colors: { ...base.colors, primary: c.accent, background: c.bg, card: c.bg, text: c.text, border: c.grid } };
@@ -93,7 +96,9 @@ export default function App() {
   return (
     <PlataformaProvider>
       <ThemeProvider>
-        <StatusAgoraProvider><Navegacao /></StatusAgoraProvider>
+        <PreferenciasProvider>
+          <StatusAgoraProvider><Navegacao /></StatusAgoraProvider>
+        </PreferenciasProvider>
       </ThemeProvider>
     </PlataformaProvider>
   );

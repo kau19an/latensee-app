@@ -17,7 +17,14 @@
     "plugins": [
       "expo-asset",
       "expo-font",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O Latensee usa sua localização aproximada só no aparelho, para escolher o ponto de medição mais próximo. Ela não é enviada para a API.",
+          "isIosReducedAccuracyByDefault": true
+        }
+      ]
     ]
   }
 }
