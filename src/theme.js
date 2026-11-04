@@ -44,20 +44,30 @@ export const STATUS = {
   Regular:    { cor: 'regular',  icon: 'alert-circle',     desc: 'Dá para usar, mas pode haver lentidão.' },
   'Instável': { cor: 'instavel', icon: 'close-circle',     desc: 'Conexão oscilando. Evite atividades importantes.' },
 };
-// Regras da professora: perda 0.5/2 %, jitter 20/50 ms
-export function classificar({ perda = 0, jitter = 0 }) {
-  if (perda > 2 || jitter > 50) return 'Instável';
-  if (perda >= 0.5 || jitter >= 20) return 'Regular';
+// Classificação: decisão do grupo = usar a regra da API (campo "quality": GOOD/MODERATE/UNSTABLE).
+// Só quando não há dado da API (dados de exemplo) usamos uma APROXIMAÇÃO dessa regra, pela perda,
+// observada na timeline real: até 1% = Boa · acima de 1% = Regular · a partir de 5% = Instável.
+// (Regra antiga do app, registrada como "da professora": perda 0,5/2 % e jitter 20/50 ms — a API não tem jitter.)
+export function classificar(p) {
+  if (p?.qualidade) return p.qualidade;
+  const perda = p?.perda ?? 0;
+  if (perda >= 5) return 'Instável';
+  if (perda > 1) return 'Regular';
   return 'Boa';
 }
 // RQ03 — atividades por categoria, em linguagem simples
+// api: código do POST /activity/check · ok: regra local (usada no "melhor horário" e sem API)
+// Jogos online não existe na API: usamos o resultado de Videochamada (a atividade mais exigente) — "estimativa do app"
 export const ATIVIDADES = [
-  { nome: 'Videochamadas', icon: 'videocam',     ok: ['Boa'] },
-  { nome: 'Jogos online',  icon: 'game-controller', ok: ['Boa'] },
-  { nome: 'Streaming',     icon: 'play-circle',  ok: ['Boa', 'Regular'] },
-  { nome: 'Navegação',     icon: 'globe',        ok: ['Boa', 'Regular', 'Instável'] },
-  { nome: 'Envio de arquivos', icon: 'cloud-upload', ok: ['Boa', 'Regular'] },
+  { nome: 'Videochamadas',     icon: 'videocam',        api: 'VIDEO_CALL',   ok: ['Boa'] },
+  { nome: 'Chamadas de voz',   icon: 'call',            api: 'AUDIO_CALL',   ok: ['Boa', 'Regular'] },
+  { nome: 'Jogos online',      icon: 'game-controller', api: 'VIDEO_CALL',   ok: ['Boa'], estimativa: true },
+  { nome: 'Streaming',         icon: 'play-circle',     api: 'STREAMING',    ok: ['Boa', 'Regular'] },
+  { nome: 'Navegação',         icon: 'globe',           api: 'WEB_BROWSING', ok: ['Boa', 'Regular', 'Instável'] },
+  { nome: 'Envio de arquivos', icon: 'cloud-upload',    api: 'FILE_UPLOAD',  ok: ['Boa', 'Regular'] },
+  { nome: 'Mensagens',         icon: 'chatbubbles',     api: 'MESSAGING',    ok: ['Boa', 'Regular', 'Instável'] },
 ];
+export const CODIGOS_ATIVIDADE = [...new Set(ATIVIDADES.map((a) => a.api))];
 // Melhor horário para uma atividade: menor latência entre os horários que servem para ela
 export function melhorHorario(lista, nomeAtividade, aPartirDe = 0) {
   const a = ATIVIDADES.find((x) => x.nome === nomeAtividade);
@@ -69,8 +79,10 @@ export function melhorHorario(lista, nomeAtividade, aPartirDe = 0) {
 // RNF07 — glossário
 export const GLOSSARIO = {
   'Latência': 'Tempo que a informação leva para ir e voltar (RTT). Quanto menor, melhor.',
-  'Jitter': 'Quanto a latência oscila de um instante para outro. Alto = conexão "pulando".',
   'Perda de pacotes': 'Parte dos dados que se perde no caminho e precisa ser reenviada.',
+  'Nota de qualidade': 'Nota de 0 a 100 calculada pela API a partir da latência e da perda previstas. Quanto maior, melhor.',
+  'Ponto de medição (probe)': 'Equipamento da rede RIPE Atlas usado como referência da sua região. A previsão é dele, não do seu celular.',
+  'Modelo de previsão': 'Cada grupo da turma treinou um modelo diferente. Você escolhe qual usar em Ajustes.',
 };
 
 // Rótulos dos dias da previsão (hoje + 5 dias)

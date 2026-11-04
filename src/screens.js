@@ -2,18 +2,58 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Switch, Pressable, Platform, AccessibilityInfo } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Circle as MapCircle } from 'react-native-maps';
-import { Screen, H, TituloTela, P, Card, Btn, Row, Badge, AvisoDados, AvisoRota, Metric, Chips, DayPicker, DIAS, ForecastChart, useBase } from './ui';
-import { useTheme, STATUS, ATIVIDADES, GLOSSARIO, classificar, melhorHorario } from './theme';
-import { getPrevisao, getPrevisaoDia, getServidores, infoDados } from './api';
+import { Screen, H, TituloTela, P, Card, Btn, Row, Badge, AvisoDados, AvisoRota, Metric, Chips, ForecastChart, useBase } from './ui';
+import { useTheme, STATUS, ATIVIDADES, CODIGOS_ATIVIDADE, GLOSSARIO, classificar, melhorHorario } from './theme';
+import { getPerfil, naHora, getServidores, getLocais, getModelos, checarAtividades } from './api';
+import { usePreferencias, regiaoPeloGPS } from './preferencias';
 import { analisarRota, lerAvisoRota } from './rotas';
 import { PREFS_PADRAO, lerPrefs, salvarPrefs, pedirPermissao, reagendarAlertas } from './alertas';
+
+/* ---------- utilidades ---------- */
+// Perfil de 24h da região e do modelo escolhidos (recarrega quando a escolha muda)
+function usePerfil() {
+  const { modelo, regiao, pronto } = usePreferencias();
+  const [lista, setLista] = useState(null);
+  useEffect(() => {
+    if (!pronto) return undefined;
+    let vivo = true;
+    setLista(null);
+    getPerfil({ modelo, probe: regiao.id }).then((r) => vivo && setLista(r));
+    return () => { vivo = false; };
+  }, [modelo, regiao.id, pronto]);
+  return lista;
+}
+// Coordenadas do probe da região (usadas no POST /activity/check — nunca as do usuário)
+function useLocalDaRegiao() {
+  const { regiao } = usePreferencias();
+  const [local, setLocal] = useState(null);
+  useEffect(() => { getLocais().then((ls) => setLocal(ls.find((l) => l.id === regiao.id) ?? null)); }, [regiao.id]);
+  return local;
+}
+// Trechos SEGUIDOS de um status: ex. "15:00–17:00, 21:00"
+function trechos(lista, status) {
+  const out = [];
+  lista.forEach((p, i) => {
+    if (classificar(p) !== status) return;
+    const ultimo = out[out.length - 1];
+    if (ultimo && ultimo.fim === i - 1) { ultimo.fim = i; } else { out.push({ ini: i, fim: i }); }
+  });
+  return out.map(({ ini, fim }) => (ini === fim ? lista[ini].hora : `${lista[ini].hora}–${lista[fim].hora}`)).join(', ');
+}
+const Metricas = ({ x, center = true }) => (
+  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
+    <Metric label="Latência" value={x.latencia} unit="ms" center={center} />
+    <Metric label="Perda" value={x.perda} unit="%" center={center} />
+    <Metric label="Nota" value={x.nota} unit="/100" center={center} />
+  </View>
+);
 
 /* ---------- ONBOARDING (5 passos, tudo centralizado) ---------- */
 const PASSOS = [
   ['Boas-vindas', 'Veja como está e como ficará sua internet, em linguagem simples.', 'hand-right'],
-  ['Velocidade', 'Mostramos se a conexão está Boa, Regular ou Instável — e a previsão para os próximos 5 dias.', 'speedometer'],
-  ['Mapa', 'Veja no mapa onde ficam os pontos que medem a sua conexão.', 'map'],
-  ['Privacidade', 'Não coletamos dados pessoais nem rastreamos você.', 'shield-checkmark'],
+  ['Velocidade', 'Mostramos se a conexão está Boa, Regular ou Instável em cada hora do dia, pela previsão dos modelos da turma.', 'speedometer'],
+  ['Mapa', 'Escolha no mapa o ponto de medição da sua região — ou deixe o app achar o mais próximo.', 'map'],
+  ['Privacidade', 'Não coletamos dados pessoais. Se você usar a localização, ela fica só no seu celular.', 'shield-checkmark'],
   ['Alertas', 'Avisamos quando a conexão estiver em risco.', 'notifications'],
 ];
 export function Onboarding({ onDone }) {
@@ -41,101 +81,131 @@ export function Onboarding({ onDone }) {
   );
 }
 
+/* ---------- REGIÃO: opção (c) — GPS se o usuário permitir, senão escolha no mapa ---------- */
+const MSG_GPS = {
+  negado: 'Sem permissão de localização. Você pode escolher a região no mapa.',
+  falhou: 'Não conseguimos achar sua localização agora. Tente de novo ou escolha no mapa.',
+};
+function CartaoRegiao({ navigation }) {
+  const { c } = useTheme();
+  const { regiao, setRegiao } = usePreferencias();
+  const [buscando, setBuscando] = useState(false);
+  const [msg, setMsg] = useState('');
+  const usarGPS = async () => {
+    setBuscando(true); setMsg('');
+    const r = await regiaoPeloGPS();
+    setBuscando(false);
+    if (r.erro) setMsg(MSG_GPS[r.erro]); else setRegiao(r);
+  };
+  if (regiao.origem !== 'padrao') {
+    const detalhe = regiao.origem === 'gps' ? `${regiao.cidade} · ${regiao.distanciaKm} km` : regiao.cidade;
+    return <Row icon="location" label="Região" value={detalhe} onPress={() => navigation.navigate('Mapa')} />;
+  }
+  return (
+    <Card>
+      <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>De qual região você quer a previsão?</Text>
+      <P style={{ color: c.sub, fontSize: 14 }}>Por enquanto mostramos {regiao.cidade}. Sua localização é usada só no celular para achar o ponto de medição mais próximo.</P>
+      <Btn label={buscando ? 'Procurando…' : 'Usar minha localização'} icon="locate" onPress={buscando ? undefined : usarGPS} />
+      <Btn kind="ghost" label="Escolher no mapa" icon="map" onPress={() => navigation.navigate('Mapa')} />
+      {msg ? <P accessibilityLiveRegion="polite" style={{ fontSize: 14 }}>{msg}</P> : null}
+    </Card>
+  );
+}
+
 /* ---------- PAINEL DE CONEXÃO / INÍCIO (RQ01-RQ04) ---------- */
-const periodos = (dia) => (dia === 0
-  ? [['Agora', new Date().getHours()], ['Manhã', 9], ['Tarde', 15], ['Noite', 21]]
-  : [['Madrugada', 3], ['Manhã', 9], ['Tarde', 15], ['Noite', 21]]);
+const PERIODOS = [['Agora', null], ['Manhã', 9], ['Tarde', 15], ['Noite', 21]];
 export function Painel({ navigation }) {
   const { c } = useTheme();
-  const [dia, setDia] = useState(0);
+  const { modelo, regiao } = usePreferencias();
+  const lista = usePerfil();
+  const local = useLocalDaRegiao();
   const [sel, setSel] = useState(0);
-  const [d, setD] = useState(null);
-  const [info, setInfo] = useState(null);
-  const [lista, setLista] = useState(null);   // previsão do dia inteiro (melhor horário)
   const [ativ, setAtiv] = useState(0);
-  const PER = periodos(dia);
-  useEffect(() => {
-    setLista(null);
-    getPrevisaoDia(dia).then(setLista);
-  }, [dia]);
-  const melhor = melhorHorario(lista, ATIVIDADES[ativ].nome, dia === 0 ? new Date().getHours() : 0);
-  useEffect(() => {
-    setD(null);
-    getPrevisao(PER[sel][1], dia).then((r) => {
-      setD(r); setInfo(infoDados());
-      AccessibilityInfo.announceForAccessibility(`Previsão atualizada: conexão ${classificar(r)}`); // RNF08
-    });
-  }, [sel, dia]);
+  const [api, setApi] = useState(undefined); // undefined = verificando · null = sem API (regra local)
+  const hora = PERIODOS[sel][1] ?? new Date().getHours();
+  const d = lista ? naHora(lista, hora) : null;
   const status = d ? classificar(d) : null;
+
+  useEffect(() => { if (status) AccessibilityInfo.announceForAccessibility(`Previsão atualizada: conexão ${status}`); }, [d?.h, status]); // RNF08
+  useEffect(() => {
+    if (!d) return undefined;
+    let vivo = true;
+    setApi(undefined);
+    checarAtividades({ modelo, local, item: d, codigos: CODIGOS_ATIVIDADE }).then((r) => vivo && setApi(r));
+    return () => { vivo = false; };
+  }, [d?.quando, d?.h, modelo, local?.id]);
+
+  const melhor = melhorHorario(lista, ATIVIDADES[ativ].nome, new Date().getHours());
+  const valorAtividade = (a) => {
+    if (api === undefined && d?.quando) return 'Verificando…';
+    const ok = api ? api.adequado[a.api] : a.ok.includes(status);
+    return ok ? 'Recomendado' : 'Não recomendado';
+  };
   return (
     <Screen>
       <TituloTela>Sua conexão</TituloTela>
-      <AvisoDados info={info} />
-      <DayPicker dia={dia} onDia={setDia} />
-      <Chips items={PER.map(([n]) => n)} sel={sel} onSel={setSel} center label="Período" />
-      {!d ? <P style={{ textAlign: 'center' }}>Carregando previsão…</P> : (
+      <CartaoRegiao navigation={navigation} />
+      <AvisoDados info={lista?.meta} />
+      <Chips items={PERIODOS.map(([n]) => n)} sel={sel} onSel={setSel} center label="Período" />
+      {!d ? <P style={{ textAlign: 'center' }}>Carregando previsão… (o servidor pode levar até 1 minuto para acordar)</P> : (
         <>
           <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
-            <Text style={{ color: c.sub, fontSize: 14 }}>{DIAS[dia]} · {PER[sel][0]}</Text>
+            <Text style={{ color: c.sub, fontSize: 14, textAlign: 'center' }}>{PERIODOS[sel][0]} ({d.hora}) · {regiao.cidade}</Text>
             <Badge status={status} big center />
             <P style={{ textAlign: 'center' }}>{STATUS[status].desc}</P>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
-              <Metric label="Latência" value={d.latencia} unit="ms" center />
-              <Metric label="Jitter" value={d.jitter} unit="ms" center />
-              <Metric label="Perda" value={d.perda} unit="%" center />
-            </View>
+            <Metricas x={d} />
           </Card>
           <H>O que dá para fazer</H>
-          {ATIVIDADES.map((a) => {
-            const ok = a.ok.includes(status);
-            return <Row key={a.nome} icon={a.icon} label={a.nome} value={ok ? 'Recomendado' : 'Não recomendado'} />;
-          })}
+          {ATIVIDADES.map((a) => (
+            <Row key={a.nome} icon={a.icon} label={a.estimativa ? `${a.nome} (estimativa)` : a.nome} value={valorAtividade(a)} />
+          ))}
+          {api?.recomendacao?.message ? <P style={{ color: c.sub, fontSize: 14 }}>{api.recomendacao.message}</P> : null}
           <H>Melhor horário para...</H>
           <Chips items={ATIVIDADES.map((a) => a.nome)} sel={ativ} onSel={setAtiv} scroll label="Atividade" />
           <Card style={{ alignItems: 'center' }}>
-            {!lista ? <P>Carregando…</P> : melhor ? (
+            {melhor ? (
               <>
-                <Text style={{ color: c.sub, fontSize: 14 }}>{DIAS[dia]} · {ATIVIDADES[ativ].nome}</Text>
+                <Text style={{ color: c.sub, fontSize: 14 }}>Hoje · {ATIVIDADES[ativ].nome}</Text>
                 <Text accessibilityLabel={`Melhor horário: ${melhor.hora}`} style={{ color: c.text, fontSize: 32, fontWeight: '700' }}>{melhor.hora}</Text>
                 <Badge status={classificar(melhor)} center />
                 <P style={{ color: c.sub }}>Latência prevista de {melhor.latencia} ms.</P>
               </>
             ) : (
-              <P style={{ textAlign: 'center' }}>Nenhum horário bom para {ATIVIDADES[ativ].nome.toLowerCase()} {dia === 0 ? 'no resto de hoje' : 'neste dia'}.</P>
+              <P style={{ textAlign: 'center' }}>Nenhum horário bom para {ATIVIDADES[ativ].nome.toLowerCase()} no resto de hoje.</P>
             )}
           </Card>
-          <Btn label="Ver detalhes" icon="information-circle" onPress={() => navigation.navigate('Diagnostico', { d, status })} />
+          <Btn label="Ver detalhes" icon="information-circle"
+            onPress={() => navigation.navigate('Diagnostico', { d, status, recomendacao: api?.recomendacao?.message, aviso: api?.aviso })} />
         </>
       )}
     </Screen>
   );
 }
 
-/* ---------- VELOCIDADE: gráfico da previsão (hoje + 5 dias) ---------- */
+/* ---------- VELOCIDADE: gráfico das 24 horas ---------- */
 export function Velocidade({ navigation }) {
   const { c } = useTheme();
-  const [dia, setDia] = useState(0);
-  const [h, setH] = useState(null);
-  const [sel, setSel] = useState(dia === 0 ? new Date().getHours() : 12);
+  const { regiao } = usePreferencias();
+  const h = usePerfil();
+  const [sel, setSel] = useState(0);
   const [lista, setLista] = useState(false);
-  const [info, setInfo] = useState(null);
   useEffect(() => {
-    setH(null);
-    getPrevisaoDia(dia).then((r) => { setH(r); setInfo(infoDados()); setSel(dia === 0 ? Math.min(new Date().getHours(), r.length - 1) : 12); });
-  }, [dia]);
+    if (!h) return;
+    const i = h.findIndex((p) => p.h === new Date().getHours());
+    setSel(i >= 0 ? i : 0);
+  }, [h]);
   const x = h && h[sel];
   const st = x ? classificar(x) : null;
   const melhor = h && h.filter((p) => classificar(p) === 'Boa').sort((a, b) => a.latencia - b.latencia)[0];
-  const ruins = h ? h.filter((p) => classificar(p) === 'Instável') : [];
+  const evitar = h ? trechos(h, 'Instável') : '';
   return (
     <Screen>
       <TituloTela>Previsão de velocidade</TituloTela>
-      <AvisoDados info={info} />
-      <DayPicker dia={dia} onDia={setDia} />
-      {!h ? <P>Carregando previsão…</P> : (
+      <AvisoDados info={h?.meta} />
+      {!h ? <P>Carregando previsão… (o servidor pode levar até 1 minuto para acordar)</P> : (
         <>
           <Card>
-            <Text style={{ color: c.sub, fontSize: 14 }}>Latência prevista (ms) · {DIAS[dia]}</Text>
+            <Text style={{ color: c.sub, fontSize: 14 }}>Latência prevista (ms) · {regiao.cidade}</Text>
             <ForecastChart data={h} sel={sel} onSel={setSel} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
               {Object.entries(STATUS).map(([k, v]) => (
@@ -148,26 +218,22 @@ export function Velocidade({ navigation }) {
           </Card>
           {x && (
             <Card style={{ alignItems: 'center' }}>
-              <Text style={{ color: c.sub, fontSize: 14 }}>{DIAS[dia]} às {x.hora}</Text>
+              <Text style={{ color: c.sub, fontSize: 14 }}>Às {x.hora}</Text>
               <Badge status={st} center />
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
-                <Metric label="Latência" value={x.latencia} unit="ms" center />
-                <Metric label="Jitter" value={x.jitter} unit="ms" center />
-                <Metric label="Perda" value={x.perda} unit="%" center />
-              </View>
+              <Metricas x={x} />
               <View style={{ alignSelf: 'stretch' }}>
-                <Btn kind="ghost" label="Detalhes do horário" onPress={() => navigation.navigate('DetalhesTeste', { x, rotulo: `${DIAS[dia]} às ${x.hora}` })} />
+                <Btn kind="ghost" label="Detalhes do horário" onPress={() => navigation.navigate('DetalhesTeste', { x, rotulo: `às ${x.hora}` })} />
               </View>
             </Card>
           )}
           <Card>
             <Row icon="happy" label="Melhor horário" value={melhor ? `${melhor.hora} · ${melhor.latencia} ms` : 'Nenhum horário Boa'} />
-            <Row icon="warning" label="Evite" value={ruins.length ? `${ruins[0].hora} – ${ruins[ruins.length - 1].hora}` : 'Nenhum horário Instável'} />
+            <Row icon="warning" label="Evite" value={evitar || 'Nenhum horário Instável'} />
           </Card>
           <Btn kind="ghost" icon={lista ? 'chevron-up' : 'list'} label={lista ? 'Ocultar lista de horários' : 'Ver lista de horários'} onPress={() => setLista(!lista)} />
           {lista && h.map((p) => (
             <Row key={p.hora} label={p.hora} value={`${p.latencia} ms · ${classificar(p)}`}
-              onPress={() => navigation.navigate('DetalhesTeste', { x: p, rotulo: `${DIAS[dia]} às ${p.hora}` })} />
+              onPress={() => navigation.navigate('DetalhesTeste', { x: p, rotulo: `às ${p.hora}` })} />
           ))}
         </>
       )}
@@ -175,7 +241,7 @@ export function Velocidade({ navigation }) {
   );
 }
 
-/* ---------- MAPA: onde a API mede (ex.: São Paulo = Praça da Sé) ---------- */
+/* ---------- MAPA: pontos de medição (probes) da API ---------- */
 // Estilo escuro do Google Maps (Android). No iOS usamos userInterfaceStyle.
 const MAPA_ESCURO = [
   { elementType: 'geometry', stylers: [{ color: '#121016' }] },
@@ -185,23 +251,24 @@ const MAPA_ESCURO = [
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0B0A12' }] },
   { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#1A1524' }] },
 ];
-const regiao = (p, delta = 0.02) => ({ latitude: p.lat, longitude: p.lon, latitudeDelta: delta, longitudeDelta: delta });
+const regiaoMapa = (p, delta = 0.3) => ({ latitude: p.lat, longitude: p.lon, latitudeDelta: delta, longitudeDelta: delta });
 
-function Mapinha({ pontos, foco, height = 320, interativo = true, mapRef, onMarker }) {
+function Mapinha({ pontos, foco, height = 320, interativo = true, mapRef, onMarker, delta }) {
   const { c } = useTheme();
   return (
     <View style={{ height, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: c.grid }}
-      accessible={!interativo} accessibilityLabel={foco ? `Mapa: ${foco.local}, ${foco.cidade ?? ''}` : 'Mapa'}>
-      <MapView ref={mapRef} style={{ flex: 1 }} initialRegion={foco ? regiao(foco) : undefined}
+      accessible={!interativo} accessibilityLabel={foco ? `Mapa: ${foco.local}` : 'Mapa'}>
+      <MapView ref={mapRef} style={{ flex: 1 }} initialRegion={foco ? regiaoMapa(foco, delta) : undefined}
         scrollEnabled={interativo} zoomEnabled={interativo} rotateEnabled={false} pitchEnabled={false}
         userInterfaceStyle={c.dark ? 'dark' : 'light'}
         customMapStyle={Platform.OS === 'android' && c.dark ? MAPA_ESCURO : undefined}>
         {pontos.map((p) => (
           <React.Fragment key={p.id}>
-            <MapCircle center={{ latitude: p.lat, longitude: p.lon }} radius={250}
+            <MapCircle center={{ latitude: p.lat, longitude: p.lon }} radius={2000}
               fillColor={c.area} strokeColor={c.accent} strokeWidth={1} />
             <Marker coordinate={{ latitude: p.lat, longitude: p.lon }} pinColor={c.primary}
-              title={p.local} description={`${p.nome} · ${classificar(p)}`} onPress={() => onMarker && onMarker(p)} />
+              title={p.cidade} description={p.latencia != null ? `${p.latencia} ms · ${classificar(p)}` : undefined}
+              onPress={() => onMarker && onMarker(p)} />
           </React.Fragment>
         ))}
       </MapView>
@@ -211,56 +278,54 @@ function Mapinha({ pontos, foco, height = 320, interativo = true, mapRef, onMark
 
 export function Mapa({ navigation }) {
   const { c } = useTheme();
-  const [s, setS] = useState([]);
+  const { modelo, regiao, setRegiao } = usePreferencias();
+  const [s, setS] = useState(null);
   const [sel, setSel] = useState(0);
   const mapRef = useRef(null);
   const [avisos, setAvisos] = useState({});
   useEffect(() => {
-    getServidores().then(async (lista) => {
+    let vivo = true;
+    getServidores({ modelo }).then(async (lista) => {
+      if (!vivo) return;
       setS(lista);
-      if (infoDados().fonte !== 'api') return; // só aprende rota com medição real
+      const i = lista.findIndex((x) => x.id === regiao.id);
+      setSel(i >= 0 ? i : 0);
+      if (lista.meta?.fonte !== 'api') return; // só aprende rota com dado vindo da API
       const r = {};
       for (const x of lista) r[x.id] = await analisarRota(x);
-      setAvisos(r);
+      if (vivo) setAvisos(r);
     });
-  }, []);
-  const noMapa = s.filter((x) => x.lat != null);
-  const fora = s.filter((x) => x.lat == null);
-  const p = noMapa[sel];
-  const focar = (k) => { setSel(k); mapRef.current?.animateToRegion(regiao(noMapa[k]), 600); };
+    return () => { vivo = false; };
+  }, [modelo]);
+  const p = s?.[sel];
+  const focar = (k) => { setSel(k); mapRef.current?.animateToRegion(regiaoMapa(s[k]), 600); };
+  const atual = p && p.id === regiao.id;
   return (
     <Screen>
       <TituloTela>Pontos de medição</TituloTela>
-      <P style={{ color: c.sub }}>Onde a API testa a sua conexão.</P>
-      {noMapa.length > 0 && (
+      <P style={{ color: c.sub }}>Pontos da rede RIPE Atlas que a API usa como referência. Escolha o da sua região.</P>
+      <AvisoDados info={s?.meta} />
+      {!s ? <P>Carregando pontos… (o servidor pode levar até 1 minuto para acordar)</P> : (
         <>
-          <Chips items={noMapa.map((x) => x.cidade ?? x.nome)} sel={sel} onSel={focar} scroll label="Ponto de medição" />
-          <Mapinha pontos={noMapa} foco={p} mapRef={mapRef}
-            onMarker={(m) => setSel(noMapa.findIndex((x) => x.id === m.id))} />
+          <Chips items={s.map((x) => x.cidade)} sel={sel} onSel={focar} scroll label="Ponto de medição" />
+          <Mapinha pontos={s} foco={p} mapRef={mapRef}
+            onMarker={(m) => setSel(s.findIndex((x) => x.id === m.id))} />
           {p && (
             <Card>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="location" size={24} color={c.accent} />
-                <Text style={{ color: c.text, fontSize: 18, fontWeight: '700', flex: 1 }}>{p.local}</Text>
+                <Text style={{ color: c.text, fontSize: 18, fontWeight: '700', flex: 1 }}>{p.cidade}</Text>
               </View>
-              <P style={{ color: c.sub }}>{p.cidade ? `${p.cidade} · ` : ''}{p.lat.toFixed(5)}, {p.lon.toFixed(5)}</P>
+              <P style={{ color: c.sub }}>{p.operadora ? `${p.operadora} · ` : ''}{p.asn ? `AS${p.asn} · ` : ''}probe {p.id}</P>
               <Badge status={classificar(p)} />
+              {p.latencia != null && <P style={{ color: c.sub, fontSize: 14 }}>Às {p.hora}: {p.latencia} ms · {p.perda}% de perda · nota {p.nota}</P>}
               <AvisoRota aviso={avisos[p.id]} />
-              <Btn label="Detalhes do servidor" icon="server" onPress={() => navigation.navigate('Servidor', { x: p })} />
+              {atual
+                ? <Row icon="checkmark-circle" label="Esta é a sua região" />
+                : <Btn label="Usar esta região" icon="location" onPress={() => setRegiao({ id: p.id, cidade: p.cidade, origem: 'mapa' })} />}
+              <Btn kind="ghost" label="Detalhes do ponto" icon="server" onPress={() => navigation.navigate('Servidor', { x: p })} />
             </Card>
           )}
-        </>
-      )}
-      {fora.length > 0 && (
-        <>
-          <H>Outras rotas monitoradas</H>
-          {fora.map((x) => (
-            <React.Fragment key={x.id}>
-            <AvisoRota aviso={avisos[x.id]} />
-            <Row icon="server" label={`${x.nome} — ${x.rota}`} value={classificar(x)}
-              onPress={() => navigation.navigate('Servidor', { x })} />
-            </React.Fragment>
-          ))}
         </>
       )}
     </Screen>
@@ -272,10 +337,12 @@ const MSG_ALERTA = {
   '-1': 'Sem previsão do servidor agora. Tentamos de novo ao abrir o app.',
   '-2': 'Alertas desligados.',
   '-3': 'Notificações bloqueadas. Ative nas configurações do celular.',
+  '-4': 'Este aparelho não deixou agendar avisos. No Expo Go do Android as notificações são limitadas; num build do app elas funcionam.',
   0: 'Nenhum horário ruim previsto. Sem avisos por enquanto.',
 };
 export function Alertas() {
   const { c } = useTheme();
+  const { regiao } = usePreferencias();
   const [on, setOn] = useState(PREFS_PADRAO);
   const [msg, setMsg] = useState('');
   useEffect(() => { lerPrefs().then(setOn); }, []);
@@ -297,7 +364,7 @@ export function Alertas() {
     <Screen>
       <TituloTela>Alertas</TituloTela>
       <Card><Sw k="risco" label="Avisar quando estiver Regular" /><Sw k="falha" label="Avisar quando estiver Instável" /></Card>
-      <P style={{ color: c.sub }}>Só avisamos se a conexão ficar ruim por 2 horas seguidas ou mais, para evitar alarme falso. O aviso chega 30 minutos antes.</P>
+      <P style={{ color: c.sub }}>Usamos a previsão de {regiao.cidade}. Só avisamos se a conexão ficar ruim por 2 horas seguidas ou mais, para evitar alarme falso. O aviso chega 30 minutos antes.</P>
       {msg ? <P accessibilityLiveRegion="polite">{msg}</P> : null}
     </Screen>
   );
@@ -309,17 +376,23 @@ export function Privacidade() {
     <Screen>
       <TituloTela>VPN e privacidade</TituloTela>
       <Card>
-        <P>• Não coletamos dados pessoais.</P><P>• Não rastreamos sua localização.</P>
+        <P>• Não coletamos dados pessoais.</P>
+        <P>• Se você usar "minha localização", ela é usada só no celular para achar o ponto de medição mais próximo. A localização não é enviada para a API nem salva.</P>
+        <P>• Para a API vão apenas o ponto de medição escolhido e o modelo de previsão.</P>
+        <P>• A previsão é do ponto de medição da sua região, não uma medição do seu aparelho.</P>
         <P>• Usar VPN pode aumentar a latência: o caminho fica mais longo, mesmo sem defeito na rede.</P>
       </Card>
     </Screen>
   );
 }
 
-/* ---------- CONFIGURAÇÕES (com modo escuro) ---------- */
+/* ---------- CONFIGURAÇÕES (aparência, previsão e mais) ---------- */
 const TEMAS = [['claro', 'Claro', 'sunny'], ['escuro', 'Escuro', 'moon'], ['sistema', 'Automático', 'phone-portrait']];
 export function Configuracoes({ navigation, onReset }) {
   const { c, pref, setPref } = useTheme();
+  const { modelo, setModelo, regiao } = usePreferencias();
+  const [modelos, setModelos] = useState([]);
+  useEffect(() => { getModelos().then(setModelos); }, []);
   const baseTema = useBase(100);
   return (
     <Screen>
@@ -342,6 +415,27 @@ export function Configuracoes({ navigation, onReset }) {
         </View>
         <P style={{ color: c.sub, fontSize: 14 }}>Automático segue o modo claro/escuro do seu celular.</P>
       </Card>
+      <Card>
+        <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Previsão</Text>
+        <Row icon="location" label="Região" value={regiao.cidade} onPress={() => navigation.navigate('Mapa')} />
+        <Text style={{ color: c.sub, fontSize: 14 }}>Modelo de previsão (cada grupo da turma treinou um)</Text>
+        <View accessibilityRole="radiogroup">
+          {modelos.map((m) => {
+            const ativo = m.id === modelo;
+            return (
+              <Pressable key={m.id} onPress={() => setModelo(m.id)} accessibilityRole="radio" accessibilityState={{ checked: ativo }}
+                accessibilityLabel={`${m.name}, ${m.groupName}, ${m.algorithm}`}
+                style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
+                <Ionicons name={ativo ? 'radio-button-on' : 'radio-button-off'} size={24} color={c.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: c.text, fontSize: 16, fontWeight: ativo ? '700' : '400' }}>{m.name}</Text>
+                  <Text style={{ color: c.sub, fontSize: 14 }}>{m.groupName} · {m.algorithm}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Card>
       <Row icon="notifications" label="Alertas" onPress={() => navigation.navigate('Alertas')} />
       <Row icon="shield-checkmark" label="VPN e privacidade" onPress={() => navigation.navigate('Privacidade')} />
       <Row icon="help-circle" label="Ajuda" onPress={() => navigation.navigate('Ajuda')} />
@@ -351,57 +445,66 @@ export function Configuracoes({ navigation, onReset }) {
   );
 }
 
-/* ---------- DETALHES DO TESTE / HORÁRIO ---------- */
+/* ---------- DETALHES DO HORÁRIO ---------- */
 export function DetalhesTeste({ route }) {
   const { x, rotulo } = route.params; const st = classificar(x);
   return (
     <Screen>
-      <H>{rotulo ? `Previsão: ${rotulo}` : `Teste das ${x.hora}`}</H><Badge status={st} />
+      <H>{rotulo ? `Previsão ${rotulo}` : `Previsão das ${x.hora}`}</H><Badge status={st} />
       <Metric label="Latência" value={x.latencia} unit="ms" />
-      <Metric label="Jitter" value={x.jitter} unit="ms" />
       <Metric label="Perda de pacotes" value={x.perda} unit="%" />
+      <Metric label="Nota de qualidade" value={x.nota} unit="/100" />
     </Screen>
   );
 }
 
 /* ---------- DIAGNÓSTICO DA CONEXÃO ---------- */
+const AVISO_PADRAO = 'A previsão está associada ao ponto de medição da sua região e não é uma medição direta do seu aparelho.';
 export function Diagnostico({ route }) {
   const { c } = useTheme();
-  const { d, status } = route.params;
+  const { d, status, recomendacao, aviso } = route.params;
   const dicas = status === 'Boa' ? ['Tudo certo, nada a fazer.']
     : ['Aproxime-se do roteador ou use cabo.', 'Pause downloads grandes.', 'Reinicie o roteador se continuar assim.'];
   return (
     <Screen>
       <TituloTela>Diagnóstico</TituloTela><Badge status={status} />
-      <Card><P>Latência {d.latencia} ms · Jitter {d.jitter} ms · Perda {d.perda}%</P></Card>
+      <Card><P>Latência {d.latencia} ms · Perda {d.perda}% · Nota {d.nota}/100</P></Card>
+      {recomendacao ? <Card><Text style={{ fontWeight: '700', color: c.text }}>Recomendação da API</Text><P>{recomendacao}</P></Card> : null}
       <H>O que fazer</H>{dicas.map((t) => <P key={t}>• {t}</P>)}
+      <P style={{ color: c.sub, fontSize: 14 }}>{aviso || AVISO_PADRAO}</P>
       <H>Termos</H>
       {Object.entries(GLOSSARIO).map(([k, v]) => <Card key={k}><Text style={{ fontWeight: '700', color: c.text }}>{k}</Text><P>{v}</P></Card>)}
     </Screen>
   );
 }
 
-/* ---------- DETALHES DO SERVIDOR ---------- */
+/* ---------- DETALHES DO PONTO DE MEDIÇÃO ---------- */
 export function Servidor({ route }) {
   const { c } = useTheme();
   const x = route.params.x;
   const [aviso, setAviso] = useState(null);
-  useEffect(() => { lerAvisoRota(x.id).then(setAviso); }, [x.id]);
+  useEffect(() => { lerAvisoRota(x.id, x.hora).then(setAviso); }, [x.id, x.hora]);
   return (
     <Screen>
       <H>{x.nome}</H><Badge status={classificar(x)} />
       <AvisoRota aviso={aviso} />
       {x.lat != null && (
         <>
-          <Mapinha pontos={[x]} foco={x} height={200} interativo={false} />
-          <P>Local de medição: {x.local}{x.cidade ? ` — ${x.cidade}` : ''}</P>
+          <Mapinha pontos={[x]} foco={x} height={200} interativo={false} delta={0.05} />
+          <P>Local de medição: {x.local}</P>
         </>
       )}
-      <P>Endereço: {x.ip}</P><P>Rota: {x.rota}</P>
-      <Metric label="Latência" value={x.latencia} unit="ms" />
-      <Metric label="Jitter" value={x.jitter} unit="ms" />
-      <Metric label="Perda" value={x.perda} unit="%" />
-      <P style={{ color: c.sub }}>Rotas longas têm latência alta naturalmente (ex.: Brasil ⇄ EUA ~110–160 ms). Isso só é problema se houver perda ou jitter alto.</P>
+      <P>Operadora: {x.operadora ?? 'não informada'}{x.asn ? ` (AS${x.asn})` : ''}</P>
+      <P>País: {x.pais} · Probe RIPE Atlas nº {x.id}</P>
+      {x.latencia != null && (
+        <>
+          <P style={{ color: c.sub }}>Previsão às {x.hora}</P>
+          <Metric label="Latência" value={x.latencia} unit="ms" />
+          <Metric label="Perda" value={x.perda} unit="%" />
+          <Metric label="Nota" value={x.nota} unit="/100" />
+        </>
+      )}
+      <P style={{ color: c.sub }}>{AVISO_PADRAO} As coordenadas públicas dos pontos são aproximadas pelo RIPE Atlas, por privacidade.</P>
     </Screen>
   );
 }
@@ -414,7 +517,10 @@ export function Ajuda() {
       <TituloTela>Ajuda</TituloTela>
       {Object.entries(GLOSSARIO).map(([k, v]) => <Card key={k}><Text style={{ fontWeight: '700', color: c.text }}>{k}</Text><P>{v}</P></Card>)}
       <Card><Text style={{ fontWeight: '700', color: c.text }}>Boa / Regular / Instável</Text>
-        <P>Boa: perda &lt; 0,5% e jitter &lt; 20 ms. Regular: perda 0,5–2% ou jitter 20–50 ms. Instável: acima disso.</P></Card>
+        <P>A classificação vem da própria API (regra experimental do protótipo da disciplina), a partir da latência e da perda previstas.</P>
+        <P style={{ color: c.sub, fontSize: 14 }}>Sem conexão com a API, o app usa uma aproximação: até 1% de perda = Boa, acima de 1% = Regular, a partir de 5% = Instável.</P></Card>
+      <Card><Text style={{ fontWeight: '700', color: c.text }}>Jogos online (estimativa)</Text>
+        <P>A API não avalia jogos. Usamos o resultado de videochamada, que é a atividade mais exigente que ela avalia.</P></Card>
     </Screen>
   );
 }

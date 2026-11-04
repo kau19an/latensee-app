@@ -2,7 +2,8 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createNavigationContainerRef } from '@react-navigation/native';
-import { getPrevisao, infoDados } from './api';
+import { getPerfil, naHora } from './api';
+import { usePreferencias } from './preferencias';
 import { classificar, STATUS, useTheme } from './theme';
 import { IOS_VERSAO } from './plataforma';
 
@@ -18,17 +19,21 @@ const ATUALIZAR_MIN = 10;
 const Ctx = createContext(null);
 export function StatusAgoraProvider({ children }) {
   const [agora, setAgora] = useState(null);
+  const { modelo, regiao, pronto } = usePreferencias();
   useEffect(() => {
-    if (!ACESSORIO_DISPONIVEL) return undefined; // Android e iOS antigo: não busca nada a mais
+    if (!ACESSORIO_DISPONIVEL || !pronto) return undefined; // Android e iOS antigo: não busca nada a mais
     let vivo = true;
-    const carregar = () => getPrevisao(new Date().getHours(), 0)
-      .then((d) => vivo && setAgora({ ...d, status: classificar(d), fonte: infoDados().fonte }))
+    const carregar = () => getPerfil({ modelo, probe: regiao.id })
+      .then((itens) => {
+        const d = naHora(itens, new Date().getHours());
+        if (vivo && d) setAgora({ ...d, status: classificar(d), fonte: itens.meta.fonte, cidade: regiao.cidade });
+      })
       .catch(() => {});
     carregar();
     const timer = setInterval(carregar, ATUALIZAR_MIN * 60000);
     const sub = AppState.addEventListener('change', (s) => s === 'active' && carregar());
     return () => { vivo = false; clearInterval(timer); sub.remove(); };
-  }, []);
+  }, [modelo, regiao.id, pronto]);
   return <Ctx.Provider value={agora}>{children}</Ctx.Provider>;
 }
 

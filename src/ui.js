@@ -75,19 +75,32 @@ export const Row = ({ icon, label, value, onPress }) => {
   );
 };
 // Aviso quando a previsão não veio direto do servidor (texto + ícone, RNF03)
-export const AvisoDados = ({ info }) => {
+// Também avisa quando a previsão é o "perfil diário" (a API ainda não tem previsões para hoje)
+const Aviso = ({ icon, msg }) => {
   const [s, c] = useS();
-  if (!info || info.fonte === 'api') return null;
-  const hora = info.quando ? new Date(info.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-  const msg = info.fonte === 'cache'
-    ? `Sem conexão com o servidor. Mostrando a última previsão salva (às ${hora}).`
-    : 'Sem conexão com o servidor. Mostrando dados de exemplo.';
   return (
     <View accessible accessibilityLiveRegion="polite" accessibilityLabel={msg}
       style={{ flexDirection: 'row', gap: 8, alignItems: 'center', backgroundColor: c.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.border }}>
-      <Ionicons name="cloud-offline" size={22} color={c.accent} />
+      <Ionicons name={icon} size={22} color={c.accent} />
       <Text style={[s.p, { flex: 1, fontSize: 14 }]}>{msg}</Text>
     </View>
+  );
+};
+export const AvisoDados = ({ info }) => {
+  if (!info) return null;
+  const hora = info.quando ? new Date(info.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+  const conexao = info.fonte === 'cache'
+    ? `Sem conexão com o servidor. Mostrando a última previsão salva (às ${hora}).`
+    : info.fonte === 'mock' ? 'Sem conexão com o servidor. Mostrando dados de exemplo.' : null;
+  const perfil = info.perfil
+    ? `Perfil diário previsto pelo ${info.modelo?.name ?? 'modelo'} (base: ${info.base}). A API ainda não tem previsões para hoje; cada hora mostra o comportamento típico daquele horário.`
+    : null;
+  if (!conexao && !perfil) return null;
+  return (
+    <>
+      {conexao && <Aviso icon="cloud-offline" msg={conexao} />}
+      {perfil && <Aviso icon="information-circle" msg={perfil} />}
+    </>
   );
 };
 // Aviso de mudança de rota (RTT mudou muito, mas jitter e perda continuam baixos)
