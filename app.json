@@ -18,7 +18,11 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/latensee-adaptive.png",
         "backgroundColor": "#070F26"
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "plugins": [
       "expo-asset",
@@ -41,6 +45,11 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4672747f-4065-47f5-86e3-969b8575ae44"
+      }
+    }
   }
 }
