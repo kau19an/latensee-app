@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Latensee",
+    "slug": "latensee-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/latensee-icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.latensee.app",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "icon": "./assets/images/latensee-icon.png"
+    },
+    "android": {
+      "package": "com.latensee.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/latensee-adaptive.png",
+        "backgroundColor": "#070F26"
+      }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O Latensee usa sua localização aproximada só no aparelho, para escolher o ponto de medição mais próximo. Ela não é enviada para a API.",
+          "isIosReducedAccuracyByDefault": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "extraProguardRules": "-keep class androidx.work.impl.WorkDatabase_Impl { *; }\n-keep class * extends androidx.room.RoomDatabase { <init>(); }"
+          }
+        }
+      ]
+    ]
+  }
+}
