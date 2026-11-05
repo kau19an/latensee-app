@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform, AccessibilityInfo } from 'react-native';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 // Ponto único para decidir "UI do sistema" vs. "UI atual".
 // Android: nada muda (nativo = false, glass = false).
@@ -30,3 +31,11 @@ export function PlataformaProvider({ children }) {
 
 export const usePlataforma = () => useContext(PlataformaCtx);
 export const useGlass = () => useContext(PlataformaCtx).glass;
+
+// Mapa embutido (react-native-maps): no Android ele usa o Google Maps, que EXIGE uma chave de API
+// configurada no app.json (android.config.googleMaps.apiKey). O Expo Go traz a chave dele; o APK próprio não.
+// Sem a chave, abrir o mapa fecha o app — então, nesse caso, mostramos uma alternativa sem mapa.
+const CHAVE_GOOGLE_MAPS = !!Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
+export const MAPA_EMBUTIDO = Platform.OS !== 'android'
+  || Constants.executionEnvironment === ExecutionEnvironment.StoreClient // Expo Go
+  || CHAVE_GOOGLE_MAPS;

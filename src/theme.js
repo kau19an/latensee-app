@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Paletas roxas com contraste >= 4.5:1 para texto (RNF04)
+// Paletas roxas com contraste >= 4.5:1 para texto e >= 3:1 para elementos gráficos, como a borda/switch desligado (RNF04)
 // Claro = branco + roxo · Escuro = preto + roxo
 export const PALETAS = {
   claro: {
@@ -11,7 +11,7 @@ export const PALETAS = {
     primary: '#6D28D9',   // fundo de botões (branco por cima: 7,1:1)
     accent: '#6D28D9',    // ícones e textos roxos sobre o fundo
     onPrimary: '#FFFFFF',
-    border: '#A79BC0', grid: '#E4DCF2', area: 'rgba(109,40,217,0.12)',
+    border: '#857A9E', grid: '#E4DCF2', area: 'rgba(109,40,217,0.12)',
     boa: '#0B6B2E', regular: '#8A5A00', instavel: '#B3261E',
   },
   escuro: {
@@ -20,20 +20,24 @@ export const PALETAS = {
     primary: '#7C3AED',   // branco por cima: 5,7:1
     accent: '#B794F6',    // sobre preto: 8,9:1
     onPrimary: '#FFFFFF',
-    border: '#4C3D66', grid: '#2A2140', area: 'rgba(183,148,246,0.16)',
+    border: '#7A6A99', grid: '#2A2140', area: 'rgba(183,148,246,0.16)',
     boa: '#4ADE80', regular: '#FBBF24', instavel: '#F87171',
   },
 };
 
 // Tema: 'sistema' | 'claro' | 'escuro' — salvo no aparelho
-const ThemeCtx = createContext({ c: PALETAS.claro, pref: 'sistema', setPref: () => {} });
+const ThemeCtx = createContext({ c: PALETAS.claro, pref: 'sistema', setPref: () => {}, pronto: false });
 export function ThemeProvider({ children }) {
   const sistema = useColorScheme();
   const [pref, setPrefState] = useState('sistema');
-  useEffect(() => { AsyncStorage.getItem('tema').then((v) => v && setPrefState(v)); }, []);
+  // "pronto": só desenhamos o app depois de ler o tema salvo — evita piscar o tema do sistema ao abrir
+  const [pronto, setPronto] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem('tema').then((v) => v && setPrefState(v)).catch(() => {}).finally(() => setPronto(true));
+  }, []);
   const setPref = (v) => { setPrefState(v); AsyncStorage.setItem('tema', v); };
   const modo = pref === 'sistema' ? (sistema === 'dark' ? 'escuro' : 'claro') : pref;
-  const value = useMemo(() => ({ c: PALETAS[modo], pref, setPref }), [modo, pref]);
+  const value = useMemo(() => ({ c: PALETAS[modo], pref, setPref, pronto }), [modo, pref, pronto]);
   return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;
 }
 export const useTheme = () => useContext(ThemeCtx);
@@ -46,13 +50,13 @@ export const STATUS = {
 };
 // Classificação: decisão do grupo = usar a regra da API (campo "quality": GOOD/MODERATE/UNSTABLE).
 // Só quando não há dado da API (dados de exemplo) usamos uma APROXIMAÇÃO dessa regra, pela perda,
-// observada na timeline real: até 1% = Boa · acima de 1% = Regular · a partir de 5% = Instável.
+// observada na timeline real dos 4 modelos: abaixo de 1% = Boa · de 1% a 5% = Regular · a partir de 5% = Instável.
 // (Regra antiga do app, registrada como "da professora": perda 0,5/2 % e jitter 20/50 ms — a API não tem jitter.)
 export function classificar(p) {
   if (p?.qualidade) return p.qualidade;
   const perda = p?.perda ?? 0;
   if (perda >= 5) return 'Instável';
-  if (perda > 1) return 'Regular';
+  if (perda >= 1) return 'Regular';
   return 'Boa';
 }
 // RQ03 — atividades por categoria, em linguagem simples
@@ -80,6 +84,7 @@ export function melhorHorario(lista, nomeAtividade, aPartirDe = 0) {
 export const GLOSSARIO = {
   'Latência': 'Tempo que a informação leva para ir e voltar (RTT). Quanto menor, melhor.',
   'Perda de pacotes': 'Parte dos dados que se perde no caminho e precisa ser reenviada.',
+  'Jitter': 'Quanto a latência oscila de um instante para outro. Alto = conexão "pulando", ruim para chamadas e jogos. Os modelos de previsão da API não informam jitter, por isso ele não aparece na previsão.',
   'Nota de qualidade': 'Nota de 0 a 100 calculada pela API a partir da latência e da perda previstas. Quanto maior, melhor.',
   'Ponto de medição (probe)': 'Equipamento da rede RIPE Atlas usado como referência da sua região. A previsão é dele, não do seu celular.',
   'Modelo de previsão': 'Cada grupo da turma treinou um modelo diferente. Você escolhe qual usar em Ajustes.',

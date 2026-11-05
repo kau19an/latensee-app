@@ -181,6 +181,79 @@ export async function getPerfil({ modelo, probe }) {
 export const naHora = (itens, h) => itens?.find((x) => x.h === h) ?? itens?.[0] ?? null;
 
 /* ============================================================
+   JANELA DE 11 DIAS: 5 dias antes, o dia central e 5 dias depois
+   (a) centro = HOJE, se a API tiver previsões nessa janela;
+   (c) senão, centro = ÚLTIMA data que a API tem (hoje: 20/08/2026).
+   Os dias são agrupados no fuso do celular. Dias sem dado ficam vazios
+   (a tela mostra "sem previsão"), nunca inventados.
+   ============================================================ */
+export const JANELA_DIAS = 5;
+const SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const meiaNoite = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const somaDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const chaveDia = (d) => `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`;
+const dataBR = (d) => `${dois(d.getDate())}/${dois(d.getMonth() + 1)}/${d.getFullYear()}`;
+
+// A API devolve no máximo 100 itens por consulta: buscamos em blocos de 4 dias (96 horas)
+async function timelineEntre(probe, modelo, de, ate) {
+  const caminho = `${V1}/forecasts/probes/${probe}/timeline`;
+  const itens = []; let fonte = 'api'; let quando = null;
+  for (let ini = de; ini < ate; ini = somaDias(ini, 4)) {
+    const fim = new Date(Math.min(somaDias(ini, 4).getTime(), ate.getTime()) - 1000);
+    const r = await chamar(`${caminho}?${qs({ model_id: modelo, from: ini.toISOString(), to: fim.toISOString(), limit: 100 })}`);
+    itens.push(...(r.json.items ?? []));
+    if (r.fonte === 'cache') { fonte = 'cache'; quando = r.quando; }
+  }
+  return { itens, fonte, quando };
+}
+
+export async function getJanela({ modelo, probe }) {
+  try {
+    const hoje = meiaNoite(new Date());
+    let centro = hoje;
+    let busca = await timelineEntre(probe, modelo, somaDias(hoje, -JANELA_DIAS), somaDias(hoje, JANELA_DIAS + 1));
+    let referencia = false;
+    if (!busca.itens.length) {
+      // Sem dados perto de hoje: o endpoint do probe devolve a última previsão disponível
+      const ultima = await chamar(`${V1}/forecasts/probes/${probe}?${qs({ model_id: modelo })}`);
+      centro = meiaNoite(new Date(ultima.json.prediction.predictionFor));
+      busca = await timelineEntre(probe, modelo, somaDias(centro, -JANELA_DIAS), somaDias(centro, JANELA_DIAS + 1));
+      referencia = true;
+    }
+    const porDia = new Map();
+    busca.itens.map(deTimeline).forEach((x) => {
+      const k = chaveDia(new Date(x.quando));
+      if (!porDia.has(k)) porDia.set(k, new Map());
+      porDia.get(k).set(x.h, x); // uma previsão por hora
+    });
+    const chaveHoje = chaveDia(hoje);
+    const dias = Array.from({ length: 2 * JANELA_DIAS + 1 }, (_, i) => {
+      const d = somaDias(centro, i - JANELA_DIAS);
+      const k = chaveDia(d);
+      const itens = [...(porDia.get(k)?.values() ?? [])].sort((a, b) => a.h - b.h);
+      return {
+        chave: k,
+        data: dataBR(d),
+        rotulo: k === chaveHoje ? 'Hoje' : `${SEMANA[d.getDay()]} ${dois(d.getDate())}/${dois(d.getMonth() + 1)}`,
+        hoje: k === chaveHoje,
+        itens,
+      };
+    });
+    return {
+      dias,
+      centro: JANELA_DIAS,
+      referencia,
+      inicio: dias[0].data,
+      fim: dias[dias.length - 1].data,
+      centroData: dataBR(centro),
+      meta: { fonte: busca.fonte, quando: busca.quando, perfil: false },
+    };
+  } catch (e) {
+    return null; // sem API nem cache: a tela usa o perfil (ou os dados de exemplo)
+  }
+}
+
+/* ============================================================
    Pontos de medição (mapa) com a previsão da hora atual
    ============================================================ */
 export async function getServidores({ modelo }) {
