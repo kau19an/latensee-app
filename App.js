@@ -13,6 +13,7 @@ import { reagendarAlertas } from './src/alertas';
 import { IOS, PlataformaProvider, useGlass } from './src/plataforma';
 import { navRef, StatusAgoraProvider, StatusAcessorio, ACESSORIO_DISPONIVEL } from './src/statusAgora';
 import { PreferenciasProvider, usePreferencias } from './src/preferencias';
+import { ProtecaoErro } from './src/erro';
 
 const Stack = createNativeStackNavigator();
 // iOS usa a barra nativa do sistema; Android continua com a barra atual
@@ -56,7 +57,7 @@ function Tabs() {
 }
 
 function Navegacao() {
-  const { c } = useTheme();
+  const { c, pronto: temaPronto } = useTheme();
   const glass = useGlass();
   const [ready, setReady] = useState(false);
   const [seen, setSeen] = useState(false);
@@ -64,7 +65,7 @@ function Navegacao() {
   const { modelo, regiao, pronto } = usePreferencias();
   // renova avisos ao abrir e sempre que o modelo ou a região mudarem
   useEffect(() => { if (ready && pronto) reagendarAlertas().catch(() => {}); }, [ready, pronto, modelo, regiao.id]);
-  if (!ready) return null;
+  if (!ready || !temaPronto) return null; // espera o tema salvo (sem piscar) e a introdução
   const base = c.dark ? DarkTheme : DefaultTheme;
   const navTheme = { ...base, dark: c.dark, colors: { ...base.colors, primary: c.accent, background: c.bg, card: c.bg, text: c.text, border: c.grid } };
   return (
@@ -85,7 +86,6 @@ function Navegacao() {
         <Stack.Screen name="Diagnostico" component={S.Diagnostico} options={{ title: 'Diagnóstico da conexão' }} />
         <Stack.Screen name="Servidor" component={S.Servidor} options={{ title: 'Detalhes do servidor' }} />
         <Stack.Screen name="Privacidade" component={S.Privacidade} options={{ title: 'VPN e privacidade' }} />
-        <Stack.Screen name="Alertas" component={S.Alertas} />
         <Stack.Screen name="Ajuda" component={S.Ajuda} />
       </Stack.Navigator>
     </NavigationContainer>
@@ -94,6 +94,7 @@ function Navegacao() {
 
 export default function App() {
   return (
+    <ProtecaoErro>
     <PlataformaProvider>
       <ThemeProvider>
         <PreferenciasProvider>
@@ -101,5 +102,6 @@ export default function App() {
         </PreferenciasProvider>
       </ThemeProvider>
     </PlataformaProvider>
+    </ProtecaoErro>
   );
 }

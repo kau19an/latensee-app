@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Switch, Pressable, Platform, AccessibilityInfo } from 'react-native';
+import { View, Text, Switch, Pressable, Platform, AccessibilityInfo, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Circle as MapCircle } from 'react-native-maps';
-import { Screen, H, TituloTela, P, Card, Btn, Row, Badge, AvisoDados, AvisoRota, Metric, Chips, ForecastChart, useBase } from './ui';
+import { Screen, H, TituloTela, P, Card, Btn, Row, Badge, Aviso, AvisoDados, AvisoRota, Metric, Chips, ForecastChart, useBase } from './ui';
 import { useTheme, STATUS, ATIVIDADES, CODIGOS_ATIVIDADE, GLOSSARIO, classificar, melhorHorario } from './theme';
-import { getPerfil, naHora, getServidores, getLocais, getModelos, checarAtividades } from './api';
+import { getPerfil, naHora, getJanela, JANELA_DIAS, getServidores, getLocais, getModelos, checarAtividades } from './api';
 import { usePreferencias, regiaoPeloGPS } from './preferencias';
+import { MAPA_EMBUTIDO } from './plataforma';
 import { analisarRota, lerAvisoRota } from './rotas';
 import { PREFS_PADRAO, lerPrefs, salvarPrefs, pedirPermissao, reagendarAlertas } from './alertas';
 
@@ -51,7 +52,7 @@ const Metricas = ({ x, center = true }) => (
 /* ---------- ONBOARDING (5 passos, tudo centralizado) ---------- */
 const PASSOS = [
   ['Boas-vindas', 'Veja como está e como ficará sua internet, em linguagem simples.', 'hand-right'],
-  ['Velocidade', 'Mostramos se a conexão está Boa, Regular ou Instável em cada hora do dia, pela previsão dos modelos da turma.', 'speedometer'],
+  ['Velocidade', 'Mostramos se a conexão está Boa, Regular ou Instável em cada hora — de 5 dias antes a 5 dias depois — pela previsão dos modelos da turma.', 'speedometer'],
   ['Mapa', 'Escolha no mapa o ponto de medição da sua região — ou deixe o app achar o mais próximo.', 'map'],
   ['Privacidade', 'Não coletamos dados pessoais. Se você usar a localização, ela fica só no seu celular.', 'shield-checkmark'],
   ['Alertas', 'Avisamos quando a conexão estiver em risco.', 'notifications'],
@@ -182,30 +183,64 @@ export function Painel({ navigation }) {
   );
 }
 
-/* ---------- VELOCIDADE: gráfico das 24 horas ---------- */
+/* ---------- VELOCIDADE: janela de 11 dias (5 antes, o dia central, 5 depois) ---------- */
+function useJanela() {
+  const { modelo, regiao, pronto } = usePreferencias();
+  const [janela, setJanela] = useState(undefined); // undefined = carregando · null = sem API
+  useEffect(() => {
+    if (!pronto) return undefined;
+    let vivo = true;
+    setJanela(undefined);
+    getJanela({ modelo, probe: regiao.id }).then((r) => vivo && setJanela(r));
+    return () => { vivo = false; };
+  }, [modelo, regiao.id, pronto]);
+  return janela;
+}
 export function Velocidade({ navigation }) {
   const { c } = useTheme();
   const { regiao } = usePreferencias();
-  const h = usePerfil();
+  const janela = useJanela();
+  const perfil = usePerfil(); // reserva: sem API usamos o perfil (ou os dados de exemplo)
+  const [dia, setDia] = useState(JANELA_DIAS);
   const [sel, setSel] = useState(0);
   const [lista, setLista] = useState(false);
+  useEffect(() => { if (janela) setDia(janela.centro); }, [janela]);
+  const diaAtual = janela ? janela.dias[dia] : null;
+  const h = janela ? diaAtual.itens : perfil;
   useEffect(() => {
-    if (!h) return;
-    const i = h.findIndex((p) => p.h === new Date().getHours());
+    if (!h?.length) return;
+    const alvo = !janela || diaAtual?.hoje ? new Date().getHours() : 12;
+    const i = h.findIndex((p) => p.h === alvo);
     setSel(i >= 0 ? i : 0);
   }, [h]);
-  const x = h && h[sel];
+  const carregando = janela === undefined || (!janela && !perfil);
+  const x = h?.length ? h[Math.min(sel, h.length - 1)] : null;
   const st = x ? classificar(x) : null;
-  const melhor = h && h.filter((p) => classificar(p) === 'Boa').sort((a, b) => a.latencia - b.latencia)[0];
-  const evitar = h ? trechos(h, 'Instável') : '';
+  const melhor = h?.length ? h.filter((p) => classificar(p) === 'Boa').sort((a, b) => a.latencia - b.latencia)[0] : null;
+  const evitar = h?.length ? trechos(h, 'Instável') : '';
+  const rotuloDia = diaAtual ? (diaAtual.hoje ? 'Hoje' : diaAtual.data) : 'Hoje';
+  const parcial = h?.length && h.length < 24 ? `Previsão parcial: só há dados das ${h[0].hora} às ${h[h.length - 1].hora}.` : null;
   return (
     <Screen>
       <TituloTela>Previsão de velocidade</TituloTela>
-      <AvisoDados info={h?.meta} />
-      {!h ? <P>Carregando previsão… (o servidor pode levar até 1 minuto para acordar)</P> : (
+      {janela?.referencia && (
+        <Aviso icon="information-circle"
+          msg={`A API não tem previsões para os 5 dias antes e depois de hoje. Mostrando de ${janela.inicio} a ${janela.fim}, em volta da última data disponível (${janela.centroData}).`} />
+      )}
+      <AvisoDados info={janela ? janela.meta : perfil?.meta} />
+      {janela && (
+        <Chips items={janela.dias.map((d) => d.rotulo)} sel={dia} onSel={setDia} scroll label="Dia da previsão" />
+      )}
+      {carregando ? <P>Carregando previsão… (o servidor pode levar até 1 minuto para acordar)</P> : !h?.length ? (
+        <Card style={{ alignItems: 'center', paddingVertical: 24 }}>
+          <Ionicons name="calendar-outline" size={40} color={c.sub} accessibilityElementsHidden importantForAccessibility="no" />
+          <P style={{ textAlign: 'center' }}>Sem previsão para {rotuloDia === 'Hoje' ? 'hoje' : rotuloDia}.</P>
+          <P style={{ color: c.sub, fontSize: 14, textAlign: 'center' }}>O modelo escolhido não tem dados para este dia. Escolha outro dia acima.</P>
+        </Card>
+      ) : (
         <>
           <Card>
-            <Text style={{ color: c.sub, fontSize: 14 }}>Latência prevista (ms) · {regiao.cidade}</Text>
+            <Text style={{ color: c.sub, fontSize: 14 }}>Latência prevista (ms) · {rotuloDia} · {regiao.cidade}</Text>
             <ForecastChart data={h} sel={sel} onSel={setSel} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' }}>
               {Object.entries(STATUS).map(([k, v]) => (
@@ -214,15 +249,16 @@ export function Velocidade({ navigation }) {
                 </View>
               ))}
             </View>
+            {parcial ? <P style={{ color: c.sub, fontSize: 14, textAlign: 'center' }}>{parcial}</P> : null}
             <P style={{ color: c.sub, fontSize: 14, textAlign: 'center' }}>Toque ou arraste no gráfico para ver cada horário.</P>
           </Card>
           {x && (
             <Card style={{ alignItems: 'center' }}>
-              <Text style={{ color: c.sub, fontSize: 14 }}>Às {x.hora}</Text>
+              <Text style={{ color: c.sub, fontSize: 14 }}>{rotuloDia} às {x.hora}</Text>
               <Badge status={st} center />
               <Metricas x={x} />
               <View style={{ alignSelf: 'stretch' }}>
-                <Btn kind="ghost" label="Detalhes do horário" onPress={() => navigation.navigate('DetalhesTeste', { x, rotulo: `às ${x.hora}` })} />
+                <Btn kind="ghost" label="Detalhes do horário" onPress={() => navigation.navigate('DetalhesTeste', { x, rotulo: `${rotuloDia} às ${x.hora}` })} />
               </View>
             </Card>
           )}
@@ -233,7 +269,7 @@ export function Velocidade({ navigation }) {
           <Btn kind="ghost" icon={lista ? 'chevron-up' : 'list'} label={lista ? 'Ocultar lista de horários' : 'Ver lista de horários'} onPress={() => setLista(!lista)} />
           {lista && h.map((p) => (
             <Row key={p.hora} label={p.hora} value={`${p.latencia} ms · ${classificar(p)}`}
-              onPress={() => navigation.navigate('DetalhesTeste', { x: p, rotulo: `às ${p.hora}` })} />
+              onPress={() => navigation.navigate('DetalhesTeste', { x: p, rotulo: `${rotuloDia} às ${p.hora}` })} />
           ))}
         </>
       )}
@@ -253,8 +289,25 @@ const MAPA_ESCURO = [
 ];
 const regiaoMapa = (p, delta = 0.3) => ({ latitude: p.lat, longitude: p.lon, latitudeDelta: delta, longitudeDelta: delta });
 
+// Sem chave do Google Maps (APK Android): em vez do mapa embutido, abre o ponto no app de mapas do celular
+function MapaAlternativo({ foco, height }) {
+  const { c } = useTheme();
+  const abrir = () => foco && Linking.openURL(`geo:${foco.lat},${foco.lon}?q=${foco.lat},${foco.lon}(${encodeURIComponent(foco.cidade ?? 'Ponto de medição')})`).catch(() => {});
+  return (
+    <View style={{ minHeight: Math.min(height, 200), borderRadius: 16, borderWidth: 1, borderColor: c.grid, backgroundColor: c.card, padding: 16, gap: 12, justifyContent: 'center' }}>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <Ionicons name="map" size={24} color={c.accent} accessibilityElementsHidden importantForAccessibility="no" />
+        <Text style={{ color: c.text, fontSize: 16, fontWeight: '700', flex: 1 }}>{foco ? foco.cidade : 'Pontos de medição'}</Text>
+      </View>
+      <Text style={{ color: c.sub, fontSize: 14 }}>O mapa embutido não está disponível nesta versão do app. Escolha o ponto pelos botões de cidade e, se quiser ver onde ele fica, abra no app de mapas.</Text>
+      {foco ? <Btn kind="ghost" icon="open-outline" label="Abrir no app de mapas" onPress={abrir} /> : null}
+    </View>
+  );
+}
+
 function Mapinha({ pontos, foco, height = 320, interativo = true, mapRef, onMarker, delta }) {
   const { c } = useTheme();
+  if (!MAPA_EMBUTIDO) return <MapaAlternativo foco={foco} height={height} />;
   return (
     <View style={{ height, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: c.grid }}
       accessible={!interativo} accessibilityLabel={foco ? `Mapa: ${foco.local}` : 'Mapa'}>
@@ -518,7 +571,7 @@ export function Ajuda() {
       {Object.entries(GLOSSARIO).map(([k, v]) => <Card key={k}><Text style={{ fontWeight: '700', color: c.text }}>{k}</Text><P>{v}</P></Card>)}
       <Card><Text style={{ fontWeight: '700', color: c.text }}>Boa / Regular / Instável</Text>
         <P>A classificação vem da própria API (regra experimental do protótipo da disciplina), a partir da latência e da perda previstas.</P>
-        <P style={{ color: c.sub, fontSize: 14 }}>Sem conexão com a API, o app usa uma aproximação: até 1% de perda = Boa, acima de 1% = Regular, a partir de 5% = Instável.</P></Card>
+        <P style={{ color: c.sub, fontSize: 14 }}>Sem conexão com a API, o app usa uma aproximação: abaixo de 1% de perda = Boa, de 1% a 5% = Regular, a partir de 5% = Instável.</P></Card>
       <Card><Text style={{ fontWeight: '700', color: c.text }}>Jogos online (estimativa)</Text>
         <P>A API não avalia jogos. Usamos o resultado de videochamada, que é a atividade mais exigente que ela avalia.</P></Card>
     </Screen>

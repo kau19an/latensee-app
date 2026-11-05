@@ -76,7 +76,7 @@ export const Row = ({ icon, label, value, onPress }) => {
 };
 // Aviso quando a previsão não veio direto do servidor (texto + ícone, RNF03)
 // Também avisa quando a previsão é o "perfil diário" (a API ainda não tem previsões para hoje)
-const Aviso = ({ icon, msg }) => {
+export const Aviso = ({ icon, msg }) => {
   const [s, c] = useS();
   return (
     <View accessible accessibilityLiveRegion="polite" accessibilityLabel={msg}

@@ -16,10 +16,11 @@ Os caminhos reais ficam em `/api/v1/...`.
 |---|---|
 | `GET /api/v1/models` | Lista de modelos (A, B, C, D — um por grupo) para escolher em Ajustes |
 | `GET /api/v1/locations` | Os 10 pontos de medição (probes) no Mapa e no cálculo do ponto mais próximo |
-| `GET /api/v1/forecasts/probes/{id}/timeline` | Previsão hora a hora: Início, Velocidade, melhor horário, "Evite", alertas, pílula de status (iOS) |
+| `GET /api/v1/forecasts/probes/{id}/timeline` | Previsão hora a hora: Início, Velocidade (janela de 11 dias), melhor horário, "Evite", alertas, pílula de status (iOS) |
+| `GET /api/v1/forecasts/probes/{id}` | Descobrir a última data disponível, para centralizar a janela quando não há dados perto de hoje |
 | `POST /api/v1/activity/check` | "O que dá para fazer" (videochamada, voz, streaming, navegação, envio de arquivos, mensagens) |
 
-Não usados por enquanto: `/health`, `/models/{id}`, `/forecasts/nearby`, `/forecasts/probes/{id}`
+Não usados por enquanto: `/health`, `/models/{id}`, `/forecasts/nearby`
 e `/forecasts/probes/{id}/compare`. O `/nearby` não é usado de propósito (ver Privacidade).
 
 Todas as respostas ficam em cache no aparelho durante o dia. Sem internet, o app usa a última
@@ -29,8 +30,9 @@ O tempo limite das chamadas é de 45 s, porque o servidor gratuito do Render pod
 
 ## 3. Limitação principal: a API só tem previsões de um dia (20/08/2026)
 
-Consultando a timeline do probe 900001 (São Paulo) com o Modelo A, a API devolve **24 previsões,
-uma por hora, todas de 20/08/2026**. Pedindo previsões a partir de hoje, a resposta vem vazia.
+Consultando a timeline do probe 900001 (São Paulo) com **os 4 modelos (A, B, C e D)**, a API devolve
+**24 previsões em cada, uma por hora, todas de 20/08/2026 (UTC)**. Pedindo previsões a partir de hoje,
+a resposta vem vazia.
 
 Como o app lida com isso (**perfil diário**):
 
@@ -39,7 +41,19 @@ Como o app lida com isso (**perfil diário**):
    de cada hora do dia**, convertidas para o fuso do celular (ex.: 00:00 UTC = 21:00 em Brasília).
 3. O usuário vê o aviso: *"Perfil diário previsto pelo Modelo A (base: 20/08/2026). A API ainda
    não tem previsões para hoje…"*.
-4. O seletor "Hoje / Amanhã / +5 dias" foi removido, porque repetiria o mesmo dado.
+4. O Início, os alertas e a pílula de status (iOS) usam esse perfil para "agora".
+
+### Janela de 11 dias na tela Velocidade (requisito: 5 dias antes e 5 depois)
+
+- **(a)** O app busca as previsões de **5 dias antes até 5 dias depois de hoje** (em blocos de 4 dias,
+  porque a API devolve no máximo 100 itens por consulta).
+- **(c)** Se não houver nada nessa janela, o app pergunta à API a **última data disponível**
+  (`GET /forecasts/probes/{id}`) e monta a janela em volta dela — hoje, **de 15/08 a 25/08/2026** —
+  com o aviso: *"A API não tem previsões para os 5 dias antes e depois de hoje…"*.
+- Os dias são mostrados no fuso do celular. Como os dados são de 20/08 em UTC, no horário de Brasília
+  eles caem em **19/08 (21h–23h)** e **20/08 (0h–20h)**: o app indica "previsão parcial".
+- Dias sem dados aparecem como **"Sem previsão para este dia"** — nada é inventado.
+- Quando a API tiver previsões perto de hoje, o app passa sozinho para o modo (a).
 
 **Quando a API passar a ter datas reais, o app usa essas datas automaticamente**, sem mudar código
 (o passo 1 passa a retornar dados).
@@ -65,7 +79,8 @@ A regra antiga do app também usava jitter (20 / 50 ms), mas **a API não fornec
 "Jitter" foi trocado pela **nota de qualidade (0–100)** que a API calcula.
 
 Sem dados da API (modo exemplo), o app usa uma **aproximação** da regra da API, observada na
-timeline real: até 1 % de perda = Boa; acima de 1 % = Regular; a partir de 5 % = Instável.
+timeline real dos 4 modelos: abaixo de 1 % de perda = Boa; de 1 % a 5 % = Regular; a partir de 5 % = Instável
+(ex.: 0,9 % é Boa no Modelo B e 1,0 % já é Regular no Modelo D).
 
 ## 5. Alertas
 
@@ -107,7 +122,7 @@ Nas duas versões o usuário pode trocar o modelo em **Ajustes → Previsão**.
 | Tela | Mudança |
 |---|---|
 | Início | Cartão de região (GPS ou mapa); métricas Latência / Perda / Nota; atividades vindas da API (7 itens, incluindo Chamadas de voz e Mensagens); mensagem de recomendação da API |
-| Velocidade | Gráfico de 24 h da região escolhida; sem seletor de dias; **"Evite" agora lista só trechos seguidos** (ex.: "15:00–17:00"), corrigindo o "05:00 – 22:00" que juntava horários não seguidos |
+| Velocidade | **Janela de 11 dias** (5 antes, o dia central, 5 depois) com dias vazios e parciais indicados; gráfico, melhor horário, "Evite" e lista **do dia escolhido**; **"Evite" agora lista só trechos seguidos** (ex.: "15:00–17:00"), corrigindo o "05:00 – 22:00" que juntava horários não seguidos |
 | Mapa | Os 10 pontos reais da API com cidade e operadora; botão "Usar esta região"; saíram "Google DNS" e "Gateway local" (não existem na API) |
 | Detalhes do ponto | Operadora (ASN), país e nº do probe; sem IP (a API nunca envia IP) |
 | Ajustes | Nova seção "Previsão": região e escolha do modelo |
@@ -126,6 +141,8 @@ Nas duas versões o usuário pode trocar o modelo em **Ajustes → Previsão**.
 - [ ] Os nomes das cidades e das operadoras vêm de uma tabela do app (`CIDADES` e `OPERADORAS`
       em `src/api.js`), porque a API só envia coordenadas e números de ASN. Conferir.
 - [ ] Revisar os alertas quando a API tiver datas reais.
+- [ ] Avisar quem mantém a API que **todos os modelos só têm 20/08/2026**: o requisito de 5 dias antes
+      e depois só fica completo quando a API tiver mais datas.
 - [ ] Expo sugere `react-native` 0.88.1 (o repositório está em 0.88.0).
 
 ## 10. Como testar
