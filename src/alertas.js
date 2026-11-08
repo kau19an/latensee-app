@@ -14,7 +14,7 @@ Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
 });
 
-export const PREFS_PADRAO = { risco: true, falha: true };
+export const PREFS_PADRAO = { risco: true, falha: true, medicao: true };
 export const lerPrefs = async () => {
   try { return { ...PREFS_PADRAO, ...JSON.parse(await AsyncStorage.getItem('alertas')) }; } catch (e) { return PREFS_PADRAO; }
 };
@@ -94,4 +94,27 @@ async function reagendar() {
     }
   }
   return total;
+}
+
+// Alerta de FALHA REAL: avisa na hora quando uma medição do aparelho dá Instável
+// (ou quando nenhum teste respondeu). Independe da previsão e dos avisos agendados.
+// Retorna true se a notificação foi enviada.
+export async function avisarMedicao(m) {
+  try {
+    if (!m || (m.status !== 'Instável' && !m.erro)) return false;
+    const prefs = await lerPrefs();
+    if (!prefs.medicao) return false;
+    if (!(await Notifications.getPermissionsAsync()).granted) return false;
+    if (!(await criarCanal())) return false;
+    const body = m.erro
+      ? 'Nenhum dos testes respondeu: o celular parece estar sem internet.'
+      : `Latência ${m.latencia} ms, perda ${m.perda}%. ${STATUS['Instável'].desc}`;
+    await Notifications.scheduleNotificationAsync({
+      content: { title: 'Falha detectada na sua conexão', body },
+      trigger: Platform.OS === 'android' ? { channelId: 'alertas' } : null,
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
 }

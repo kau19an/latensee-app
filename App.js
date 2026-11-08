@@ -13,6 +13,7 @@ import { reagendarAlertas } from './src/alertas';
 import { IOS, PlataformaProvider, useGlass } from './src/plataforma';
 import { navRef, StatusAgoraProvider, StatusAcessorio, ACESSORIO_DISPONIVEL } from './src/statusAgora';
 import { PreferenciasProvider, usePreferencias } from './src/preferencias';
+import { MedicaoProvider } from './src/medicaoCtx';
 import { ProtecaoErro } from './src/erro';
 
 const Stack = createNativeStackNavigator();
@@ -87,6 +88,8 @@ function Navegacao() {
         <Stack.Screen name="Servidor" component={S.Servidor} options={{ title: 'Detalhes do servidor' }} />
         <Stack.Screen name="Privacidade" component={S.Privacidade} options={{ title: 'VPN e privacidade' }} />
         <Stack.Screen name="Ajuda" component={S.Ajuda} />
+        <Stack.Screen name="Historico" component={S.Historico} options={{ title: 'Histórico de medições' }} />
+        <Stack.Screen name="Comparacao" component={S.Comparacao} options={{ title: 'Comparar os modelos' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -98,7 +101,7 @@ export default function App() {
     <PlataformaProvider>
       <ThemeProvider>
         <PreferenciasProvider>
-          <StatusAgoraProvider><Navegacao /></StatusAgoraProvider>
+          <StatusAgoraProvider><MedicaoProvider><Navegacao /></MedicaoProvider></StatusAgoraProvider>
         </PreferenciasProvider>
       </ThemeProvider>
     </PlataformaProvider>

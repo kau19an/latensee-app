@@ -286,3 +286,51 @@ export async function checarAtividades({ modelo, local, item, codigos }) {
     return null;
   }
 }
+
+/* ============================================================
+   Comparação dos modelos: o MESMO instante previsto por todos os modelos ativos
+   (GET /forecasts/probes/{id}/compare). A API não diz qual modelo é melhor.
+   ============================================================ */
+export async function getComparacao({ probe, quando }) {
+  const q = quando ? `?prediction_for=${encodeURIComponent(quando)}` : '';
+  try {
+    const { json, fonte } = await chamar(`${V1}/forecasts/probes/${probe}/compare${q}`);
+    const d = new Date(json.predictionFor);
+    return {
+      fonte,
+      hora: `${dois(d.getHours())}:00`,
+      base: dataUTC(json.predictionFor),
+      modelos: json.models.map((m) => ({
+        id: m.modelId,
+        nome: m.modelName,
+        latencia: Math.round(m.predictedAvgRttMs),
+        perda: Math.round(m.predictedPacketLossPct * 10) / 10,
+        qualidade: QUALIDADE[m.quality] ?? null,
+      })),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ============================================================
+   Status do servidor da API (GET /health), sem cache: mede o tempo de resposta.
+   Retorna { estado: 'online' | 'lento' | 'fora', ms }
+   'lento' = respondeu, mas demorou mais de 5 s (servidor gratuito "acordando")
+   ============================================================ */
+export async function verificarAPI() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const t0 = Date.now();
+  try {
+    const r = await fetch(`${BASE}${V1}/health?t=${t0}`, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    const ms = Date.now() - t0;
+    const json = r.ok ? await r.json() : null;
+    if (json?.status !== 'ok') return { estado: 'fora', ms };
+    return { estado: ms > 5000 ? 'lento' : 'online', ms };
+  } catch (e) {
+    return { estado: 'fora', ms: Date.now() - t0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
