@@ -4,11 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Circle as MapCircle } from 'react-native-maps';
 import { Screen, H, TituloTela, P, Card, Btn, Row, Badge, Aviso, AvisoDados, AvisoRota, Metric, Chips, ForecastChart, useBase } from './ui';
 import { useTheme, STATUS, ATIVIDADES, CODIGOS_ATIVIDADE, GLOSSARIO, classificar, melhorHorario } from './theme';
-import { getPerfil, naHora, getJanela, JANELA_DIAS, getServidores, getLocais, getModelos, checarAtividades } from './api';
+import { getPerfil, naHora, getJanela, JANELA_DIAS, getServidores, getLocais, getModelos, checarAtividades, getComparacao, verificarAPI } from './api';
 import { usePreferencias, regiaoPeloGPS } from './preferencias';
 import { MAPA_EMBUTIDO } from './plataforma';
 import { analisarRota, lerAvisoRota } from './rotas';
-import { medirConexao, lerUltimaMedicao, AMOSTRAS } from './medicao';
+import { AMOSTRAS, INTERVALOS_MIN, HIST_MAX, lerHistorico, limparHistorico, resumoHistorico } from './medicao';
+import { useMedicao } from './medicaoCtx';
 import { PREFS_PADRAO, lerPrefs, salvarPrefs, pedirPermissao, reagendarAlertas } from './alertas';
 
 /* ---------- utilidades ---------- */
@@ -114,32 +115,20 @@ function CartaoRegiao({ navigation }) {
   );
 }
 
-/* ---------- MEDIÇÃO REAL: "Medir minha conexão agora" (projeto 2) ---------- */
-function CartaoMedicao({ lista }) {
+/* ---------- MEDIÇÃO REAL: "Medir minha conexão agora" ---------- */
+function CartaoMedicao({ lista, navigation }) {
   const { c } = useTheme();
-  const [r, setR] = useState(null);         // última medição
-  const [progresso, setProgresso] = useState(null); // null = parado · número = requisições feitas
-  const [erro, setErro] = useState('');
-  const [aviso, setAviso] = useState(null); // detecção de mudança de rota (Ryan) com dado real
-  useEffect(() => { lerUltimaMedicao().then((m) => m && setR(m)); }, []);
-  const medir = async () => {
-    setErro(''); setProgresso(0);
-    const m = await medirConexao({ aoProgredir: (feitas) => setProgresso(feitas) });
-    setProgresso(null);
-    if (m.erro) { setErro('Não foi possível medir: parece que o celular está sem internet.'); return; }
-    setR(m);
-    setAviso(await analisarRota({ id: 'medicao', ...m }));
-    AccessibilityInfo.announceForAccessibility(`Medição concluída: latência ${m.latencia} milissegundos, jitter ${m.jitter}, perda ${m.perda} por cento, conexão ${classificar(m)}`);
-  };
+  const { ultima: r, progresso, erro, aviso, medir, auto } = useMedicao();
   const previsto = r && lista ? naHora(lista, r.h) : null;
   const quando = r ? new Date(r.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
   return (
     <Card>
       <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Sua conexão agora (medida)</Text>
       <P style={{ color: c.sub, fontSize: 14 }}>Mede o seu aparelho de verdade, com {AMOSTRAS} testes rápidos. A previsão acima é do ponto de medição da região.</P>
+      {auto.ligado ? <P style={{ color: c.sub, fontSize: 14 }}>Medição automática ligada: a cada {auto.intervalo} min, com o app aberto.</P> : null}
       {r && (
         <>
-          <Text style={{ color: c.sub, fontSize: 14 }}>Medido às {quando}</Text>
+          <Text style={{ color: c.sub, fontSize: 14 }}>Medido às {quando}{r.origem === 'auto' ? ' (automática)' : ''}</Text>
           <Badge status={classificar(r)} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
             <Metric label="Latência" value={r.latencia} unit="ms" center />
@@ -156,9 +145,10 @@ function CartaoMedicao({ lista }) {
         </>
       )}
       <Btn label={progresso != null ? `Medindo… ${progresso}/${AMOSTRAS}` : r ? 'Medir de novo' : 'Medir minha conexão agora'}
-        icon="pulse" onPress={progresso != null ? undefined : medir}
+        icon="pulse" onPress={progresso != null ? undefined : () => medir('manual')}
         hint="Faz testes rápidos de tempo de resposta usando a sua internet" />
       {erro ? <P accessibilityLiveRegion="polite" style={{ fontSize: 14 }}>{erro}</P> : null}
+      <Btn label="Ver histórico de medições" icon="time" kind="ghost" onPress={() => navigation.navigate('Historico')} />
     </Card>
   );
 }
@@ -206,7 +196,7 @@ export function Painel({ navigation }) {
             <P style={{ textAlign: 'center' }}>{STATUS[status].desc}</P>
             <Metricas x={d} />
           </Card>
-          <CartaoMedicao lista={lista} />
+          <CartaoMedicao lista={lista} navigation={navigation} />
           <H>O que dá para fazer</H>
           {ATIVIDADES.map((a) => (
             <Row key={a.nome} icon={a.icon} label={a.estimativa ? `${a.nome} (estimativa)` : a.nome} value={valorAtividade(a)} />
@@ -228,6 +218,8 @@ export function Painel({ navigation }) {
           </Card>
           <Btn label="Ver detalhes" icon="information-circle"
             onPress={() => navigation.navigate('Diagnostico', { d, status, recomendacao: api?.recomendacao?.message, aviso: api?.aviso })} />
+          <Btn label="Comparar os 4 modelos" icon="git-compare" kind="ghost"
+            onPress={() => navigation.navigate('Comparacao', { quando: d.quando, hora: d.hora })} />
         </>
       )}
     </Screen>
@@ -468,7 +460,9 @@ export function Alertas() {
     <Screen>
       <TituloTela>Alertas</TituloTela>
       <Card><Sw k="risco" label="Avisar quando estiver Regular" /><Sw k="falha" label="Avisar quando estiver Instável" /></Card>
+      <Card><Sw k="medicao" label="Avisar na hora quando a medição real der Instável" /></Card>
       <P style={{ color: c.sub }}>Usamos a previsão de {regiao.cidade}. Só avisamos se a conexão ficar ruim por 2 horas seguidas ou mais, para evitar alarme falso. O aviso chega 30 minutos antes.</P>
+      <P style={{ color: c.sub }}>O aviso da medição real é diferente: chega no momento em que uma medição do seu aparelho (botão ou automática) dá Instável ou não recebe resposta.</P>
       {msg ? <P accessibilityLiveRegion="polite">{msg}</P> : null}
     </Screen>
   );
@@ -487,6 +481,140 @@ export function Privacidade() {
         <P>• A previsão é do ponto de medição da sua região, não uma medição do seu aparelho.</P>
         <P>• Usar VPN pode aumentar a latência: o caminho fica mais longo, mesmo sem defeito na rede.</P>
       </Card>
+    </Screen>
+  );
+}
+
+/* ---------- AJUSTES DA MEDIÇÃO REAL (automática) ---------- */
+function CartaoMedicaoAuto({ navigation }) {
+  const { c } = useTheme();
+  const { auto, setAuto } = useMedicao();
+  const label = 'Medir automaticamente com o app aberto';
+  return (
+    <Card>
+      <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Medição real</Text>
+      <View style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <P style={{ flex: 1 }}>{label}</P>
+        <Switch value={auto.ligado} onValueChange={(v) => setAuto({ ...auto, ligado: v })} accessibilityLabel={label}
+          trackColor={{ true: c.primary, false: c.border }} thumbColor="#FFFFFF" />
+      </View>
+      {auto.ligado ? (
+        <>
+          <Text style={{ color: c.sub, fontSize: 14 }}>Intervalo entre as medições</Text>
+          <Chips items={INTERVALOS_MIN.map((m) => `${m} min`)} sel={Math.max(0, INTERVALOS_MIN.indexOf(auto.intervalo))}
+            onSel={(k) => setAuto({ ...auto, intervalo: INTERVALOS_MIN[k] })} label="Intervalo" />
+        </>
+      ) : null}
+      <P style={{ color: c.sub, fontSize: 14 }}>O celular não permite medir com o app fechado; a medição automática acontece só enquanto ele está aberto.</P>
+      <Row icon="time" label="Histórico de medições" onPress={() => navigation.navigate('Historico')} />
+    </Card>
+  );
+}
+
+/* ---------- STATUS DO SERVIDOR DA API (GET /health) ---------- */
+const ESTADO_API = {
+  online: ['Boa', 'Online'],
+  lento: ['Regular', 'Respondendo devagar (servidor acordando)'],
+  fora: ['Instável', 'Fora do ar ou sem conexão'],
+};
+function CartaoStatusAPI() {
+  const { c } = useTheme();
+  const [st, setSt] = useState(null);
+  const [verificando, setVerificando] = useState(false);
+  const verificar = async () => {
+    setVerificando(true);
+    const r = await verificarAPI();
+    setSt({ ...r, quando: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+    setVerificando(false);
+    AccessibilityInfo.announceForAccessibility(`Servidor da previsão: ${ESTADO_API[r.estado][1]}`);
+  };
+  useEffect(() => { verificar(); }, []);
+  return (
+    <Card>
+      <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Servidor da previsão</Text>
+      {st ? (
+        <>
+          <Badge status={ESTADO_API[st.estado][0]} />
+          <P>{ESTADO_API[st.estado][1]} · resposta em {(st.ms / 1000).toFixed(1).replace('.', ',')} s · verificado às {st.quando}</P>
+        </>
+      ) : <P>Verificando…</P>}
+      <Btn label={verificando ? 'Verificando…' : 'Verificar de novo'} icon="refresh" kind="ghost"
+        onPress={verificando ? undefined : verificar} hint="Consulta o status da Internet Quality API" />
+    </Card>
+  );
+}
+
+/* ---------- HISTÓRICO DE MEDIÇÕES ---------- */
+export function Historico() {
+  const { c } = useTheme();
+  const { versao } = useMedicao();
+  const [lista, setLista] = useState(null);
+  useEffect(() => { lerHistorico().then(setLista); }, [versao]);
+  if (!lista) return <Screen><P>Carregando…</P></Screen>;
+  const r = resumoHistorico(lista);
+  const limpar = async () => { await limparHistorico(); setLista([]); };
+  return (
+    <Screen>
+      <TituloTela>Histórico de medições</TituloTela>
+      {lista.length === 0 ? (
+        <P>Nenhuma medição ainda. Use "Medir minha conexão agora" no Início ou ligue a medição automática em Ajustes.</P>
+      ) : (
+        <>
+          <Card>
+            <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Resumo</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
+              <Metric label="Medições" value={r.total} unit="" center />
+              <Metric label="Latência média" value={r.latenciaMedia ?? '—'} unit="ms" center />
+              <Metric label="Instáveis" value={r.instaveis} unit="" center />
+            </View>
+            <P style={{ color: c.sub, fontSize: 14 }}>Guardamos as {HIST_MAX} medições mais recentes, só neste celular.</P>
+          </Card>
+          {lista.map((m) => {
+            const d = new Date(m.quando);
+            const data = `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+            return (
+              <Card key={m.quando}>
+                <Text style={{ color: c.sub, fontSize: 14 }}>{data} · {m.origem === 'auto' ? 'automática' : 'manual'}</Text>
+                <Badge status={m.status ?? classificar(m)} />
+                <P>{m.falhou ? 'Nenhum teste respondeu (sem internet).' : `Latência ${m.latencia} ms · Jitter ${m.jitter} ms · Perda ${m.perda}%`}</P>
+              </Card>
+            );
+          })}
+          <Btn label="Apagar histórico" icon="trash" kind="ghost" onPress={limpar} />
+        </>
+      )}
+    </Screen>
+  );
+}
+
+/* ---------- COMPARAÇÃO DOS MODELOS (GET /compare) ---------- */
+export function Comparacao({ route }) {
+  const { c } = useTheme();
+  const { regiao, modelo } = usePreferencias();
+  const [r, setR] = useState(undefined); // undefined = carregando · null = sem resposta
+  const quando = route.params?.quando;
+  useEffect(() => {
+    let vivo = true;
+    getComparacao({ probe: regiao.id, quando }).then((x) => vivo && setR(x));
+    return () => { vivo = false; };
+  }, [regiao.id, quando]);
+  return (
+    <Screen>
+      <TituloTela>Comparar os modelos</TituloTela>
+      <P style={{ color: c.sub }}>Mesmo horário e mesmo ponto de medição ({regiao.cidade}), previstos por cada modelo da turma. A API não diz qual é o melhor: as diferenças vêm só das previsões.</P>
+      {r === undefined ? <P>Carregando… (o servidor pode levar até 1 minuto para acordar)</P>
+        : r === null ? <P>Não foi possível comparar agora. Verifique a internet e tente de novo.</P> : (
+          <>
+            <P>Horário comparado: {r.hora} (dia de referência {r.base}){r.fonte === 'cache' ? ' · resposta salva' : ''}</P>
+            {r.modelos.map((m) => (
+              <Card key={m.id}>
+                <Text style={{ color: c.text, fontSize: 16, fontWeight: '700' }}>{m.nome}{m.id === modelo ? ' (em uso)' : ''}</Text>
+                <Badge status={m.qualidade ?? classificar(m)} />
+                <P>Latência {m.latencia} ms · Perda {m.perda}%</P>
+              </Card>
+            ))}
+          </>
+        )}
     </Screen>
   );
 }
@@ -523,6 +651,7 @@ export function Configuracoes({ navigation, onReset }) {
       <Card>
         <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Previsão</Text>
         <Row icon="location" label="Região" value={regiao.cidade} onPress={() => navigation.navigate('Mapa')} />
+        <Row icon="git-compare" label="Comparar os modelos" onPress={() => navigation.navigate('Comparacao', {})} />
         <Text style={{ color: c.sub, fontSize: 14 }}>Modelo de previsão (cada grupo da turma treinou um)</Text>
         <View accessibilityRole="radiogroup">
           {modelos.map((m) => {
@@ -541,6 +670,8 @@ export function Configuracoes({ navigation, onReset }) {
           })}
         </View>
       </Card>
+      <CartaoStatusAPI />
+      <CartaoMedicaoAuto navigation={navigation} />
       <Row icon="notifications" label="Alertas" onPress={() => navigation.navigate('Alertas')} />
       <Row icon="shield-checkmark" label="VPN e privacidade" onPress={() => navigation.navigate('Privacidade')} />
       <Row icon="help-circle" label="Ajuda" onPress={() => navigation.navigate('Ajuda')} />

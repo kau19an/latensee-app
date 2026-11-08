@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { classificar } from './theme';
 
 /* ============================================================
    MEDIÇÃO REAL DA CONEXÃO (projeto 2 — branch feat/medicao-real)
@@ -57,8 +58,42 @@ export function calcularMedicao(tempos, total) {
   };
 }
 
+// Histórico (fila): a medição mais nova entra no início e a mais antiga sai quando passa de HIST_MAX
+const CHAVE_HIST = 'historicoMedicoes';
+export const HIST_MAX = 50;
+export async function lerHistorico() {
+  try { return JSON.parse(await AsyncStorage.getItem(CHAVE_HIST)) ?? []; } catch (e) { return []; }
+}
+async function guardarNoHistorico(m) {
+  const lista = [m, ...(await lerHistorico())].slice(0, HIST_MAX);
+  await AsyncStorage.setItem(CHAVE_HIST, JSON.stringify(lista)).catch(() => {});
+}
+export const limparHistorico = () => AsyncStorage.removeItem(CHAVE_HIST).catch(() => {});
+
+// Indicadores do histórico (agregação): média de latência, % de medições Instável e total
+export function resumoHistorico(lista) {
+  const ok = lista.filter((m) => m.latencia != null);
+  return {
+    total: lista.length,
+    latenciaMedia: ok.length ? Math.round(media(ok.map((m) => m.latencia))) : null,
+    perdaMedia: lista.length ? Math.round(media(lista.map((m) => m.perda)) * 10) / 10 : null,
+    instaveis: lista.filter((m) => m.status === 'Instável').length,
+  };
+}
+
+// Medição automática (só com o app aberto): preferências
+const CHAVE_AUTO = 'medicaoAuto';
+export const INTERVALOS_MIN = [5, 15, 30];
+export const AUTO_PADRAO = { ligado: false, intervalo: 5 };
+export async function lerAuto() {
+  try { return { ...AUTO_PADRAO, ...JSON.parse(await AsyncStorage.getItem(CHAVE_AUTO)) }; } catch (e) { return AUTO_PADRAO; }
+}
+export const salvarAuto = (a) => AsyncStorage.setItem(CHAVE_AUTO, JSON.stringify(a)).catch(() => {});
+
 // aoProgredir(feitas, total) é chamado a cada requisição (para a barra de progresso)
-export async function medirConexao({ aoProgredir } = {}) {
+// origem: 'manual' (botão) ou 'auto' (medição automática). Toda medição vai para o histórico,
+// inclusive as que falham por completo (registradas como 100% de perda).
+export async function medirConexao({ aoProgredir, origem = 'manual' } = {}) {
   await umaRequisicao(); // aquecimento, descartado
   const tempos = [];
   for (let i = 0; i < AMOSTRAS; i++) {
@@ -67,11 +102,16 @@ export async function medirConexao({ aoProgredir } = {}) {
     aoProgredir?.(i + 1, AMOSTRAS);
     if (i < AMOSTRAS - 1) await esperar(PAUSA_MS);
   }
-  const r = calcularMedicao(tempos, AMOSTRAS);
-  if (!r) return { erro: 'sem-conexao' };
   const d = new Date();
-  const resultado = { ...r, amostras: AMOSTRAS, quando: d.getTime(), h: d.getHours(), hora: `${dois(d.getHours())}:00`, alvo: ALVO.nome };
+  const base = { amostras: AMOSTRAS, quando: d.getTime(), h: d.getHours(), hora: `${dois(d.getHours())}:00`, alvo: ALVO.nome, origem };
+  const r = calcularMedicao(tempos, AMOSTRAS);
+  if (!r) {
+    await guardarNoHistorico({ ...base, latencia: null, jitter: null, perda: 100, status: 'Instável', falhou: true });
+    return { erro: 'sem-conexao' };
+  }
+  const resultado = { ...base, ...r, status: classificar(r) };
   AsyncStorage.setItem(CHAVE, JSON.stringify(resultado)).catch(() => {});
+  await guardarNoHistorico(resultado);
   return resultado;
 }
 

@@ -87,6 +87,8 @@ export const GLOSSARIO = {
   'Jitter': 'Quanto a latência oscila de um instante para outro. Alto = conexão "pulando", ruim para chamadas e jogos. Os modelos de previsão da API não informam jitter; ele aparece na medição real ("Medir minha conexão agora").',
   'Nota de qualidade': 'Nota de 0 a 100 calculada pela API a partir da latência e da perda previstas. Quanto maior, melhor.',
   'Ponto de medição (probe)': 'Equipamento da rede RIPE Atlas usado como referência da sua região. A previsão é dele, não do seu celular.',
+  'Status (OK / RISCO / FALHA)': 'No projeto integrador, o estado de um host é chamado de OK, RISCO ou FALHA. No app: Boa = OK, Regular = RISCO e Instável = FALHA.',
+  'Histórico de medições': 'Lista das últimas medições reais do seu aparelho, com horário, latência, jitter, perda e estado. Fica só no celular.',
   'Modelo de previsão': 'Cada grupo da turma treinou um modelo diferente. Você escolhe qual usar em Ajustes.',
 };
 

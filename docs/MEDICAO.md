@@ -63,3 +63,16 @@ a classificação e a comparação com a previsão da mesma hora. O termo "Jitte
 2. Tocar em **"Medir minha conexão agora"** e aguardar ~7 s ("Medindo… N/20").
 3. Ver os números e a comparação com o previsto.
 4. Ativar o modo avião e medir de novo: deve aparecer "parece que o celular está sem internet".
+
+## Recursos adicionados na v6 (alinhamento com o tutorial do projeto integrador)
+
+| Recurso | Onde | Item do tutorial |
+|---|---|---|
+| Histórico de medições (fila com as 50 mais recentes, incluindo as que falharam) + resumo (total, latência média, nº de Instáveis) | Botão "Ver histórico de medições" no Início; Ajustes → Medição real | RF03, RF05; Etapa 3 (listas/filas e agregação) |
+| Medição automática a cada 5, 15 ou 30 min, só com o app aberto (desligada por padrão) | Ajustes → Medição real | RF02 (verificações em intervalos) |
+| Alerta de falha real: notificação na hora quando a medição dá Instável ou ninguém responde | Alertas → "Avisar na hora quando a medição real der Instável" | RF05 (alertas) |
+| Equivalência de status: Boa = OK, Regular = RISCO, Instável = FALHA | Ajuda / glossário | Classificação OK, RISCO ou FALHA |
+| Comparação dos modelos A–D no mesmo horário (`GET /forecasts/probes/{id}/compare`) | Início → "Comparar os 4 modelos"; Ajustes → Previsão | Redes: comparação dos modelos |
+| Status do servidor da API (`GET /health`) com tempo de resposta | Ajustes → Servidor da previsão | Etapa 4: cenário indisponível |
+
+Limitações que continuam: a medição é por HTTP (o celular não permite ICMP sem código nativo) e não roda com o app fechado.
