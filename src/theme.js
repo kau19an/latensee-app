@@ -84,7 +84,7 @@ export function melhorHorario(lista, nomeAtividade, aPartirDe = 0) {
 export const GLOSSARIO = {
   'Latência': 'Tempo que a informação leva para ir e voltar (RTT). Quanto menor, melhor.',
   'Perda de pacotes': 'Parte dos dados que se perde no caminho e precisa ser reenviada.',
-  'Jitter': 'Quanto a latência oscila de um instante para outro. Alto = conexão "pulando", ruim para chamadas e jogos. Os modelos de previsão da API não informam jitter, por isso ele não aparece na previsão.',
+  'Jitter': 'Quanto a latência oscila de um instante para outro. Alto = conexão "pulando", ruim para chamadas e jogos. Os modelos de previsão da API não informam jitter; ele aparece na medição real ("Medir minha conexão agora").',
   'Nota de qualidade': 'Nota de 0 a 100 calculada pela API a partir da latência e da perda previstas. Quanto maior, melhor.',
   'Ponto de medição (probe)': 'Equipamento da rede RIPE Atlas usado como referência da sua região. A previsão é dele, não do seu celular.',
   'Modelo de previsão': 'Cada grupo da turma treinou um modelo diferente. Você escolhe qual usar em Ajustes.',

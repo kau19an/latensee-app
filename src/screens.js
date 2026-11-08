@@ -8,6 +8,7 @@ import { getPerfil, naHora, getJanela, JANELA_DIAS, getServidores, getLocais, ge
 import { usePreferencias, regiaoPeloGPS } from './preferencias';
 import { MAPA_EMBUTIDO } from './plataforma';
 import { analisarRota, lerAvisoRota } from './rotas';
+import { medirConexao, lerUltimaMedicao, AMOSTRAS } from './medicao';
 import { PREFS_PADRAO, lerPrefs, salvarPrefs, pedirPermissao, reagendarAlertas } from './alertas';
 
 /* ---------- utilidades ---------- */
@@ -113,6 +114,55 @@ function CartaoRegiao({ navigation }) {
   );
 }
 
+/* ---------- MEDIÇÃO REAL: "Medir minha conexão agora" (projeto 2) ---------- */
+function CartaoMedicao({ lista }) {
+  const { c } = useTheme();
+  const [r, setR] = useState(null);         // última medição
+  const [progresso, setProgresso] = useState(null); // null = parado · número = requisições feitas
+  const [erro, setErro] = useState('');
+  const [aviso, setAviso] = useState(null); // detecção de mudança de rota (Ryan) com dado real
+  useEffect(() => { lerUltimaMedicao().then((m) => m && setR(m)); }, []);
+  const medir = async () => {
+    setErro(''); setProgresso(0);
+    const m = await medirConexao({ aoProgredir: (feitas) => setProgresso(feitas) });
+    setProgresso(null);
+    if (m.erro) { setErro('Não foi possível medir: parece que o celular está sem internet.'); return; }
+    setR(m);
+    setAviso(await analisarRota({ id: 'medicao', ...m }));
+    AccessibilityInfo.announceForAccessibility(`Medição concluída: latência ${m.latencia} milissegundos, jitter ${m.jitter}, perda ${m.perda} por cento, conexão ${classificar(m)}`);
+  };
+  const previsto = r && lista ? naHora(lista, r.h) : null;
+  const quando = r ? new Date(r.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+  return (
+    <Card>
+      <Text accessibilityRole="header" style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>Sua conexão agora (medida)</Text>
+      <P style={{ color: c.sub, fontSize: 14 }}>Mede o seu aparelho de verdade, com {AMOSTRAS} testes rápidos. A previsão acima é do ponto de medição da região.</P>
+      {r && (
+        <>
+          <Text style={{ color: c.sub, fontSize: 14 }}>Medido às {quando}</Text>
+          <Badge status={classificar(r)} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignSelf: 'stretch' }}>
+            <Metric label="Latência" value={r.latencia} unit="ms" center />
+            <Metric label="Jitter" value={r.jitter} unit="ms" center />
+            <Metric label="Perda" value={r.perda} unit="%" center />
+          </View>
+          {previsto && (
+            <P style={{ color: c.sub, fontSize: 14 }}>
+              Previsto para as {previsto.hora}: {previsto.latencia} ms e {previsto.perda}% de perda ({classificar(previsto)}). Medido: {r.latencia} ms e {r.perda}%.
+              {' '}A previsão é do ponto de medição da região e a medição é do seu aparelho; diferenças são esperadas.
+            </P>
+          )}
+          <AvisoRota aviso={aviso} />
+        </>
+      )}
+      <Btn label={progresso != null ? `Medindo… ${progresso}/${AMOSTRAS}` : r ? 'Medir de novo' : 'Medir minha conexão agora'}
+        icon="pulse" onPress={progresso != null ? undefined : medir}
+        hint="Faz testes rápidos de tempo de resposta usando a sua internet" />
+      {erro ? <P accessibilityLiveRegion="polite" style={{ fontSize: 14 }}>{erro}</P> : null}
+    </Card>
+  );
+}
+
 /* ---------- PAINEL DE CONEXÃO / INÍCIO (RQ01-RQ04) ---------- */
 const PERIODOS = [['Agora', null], ['Manhã', 9], ['Tarde', 15], ['Noite', 21]];
 export function Painel({ navigation }) {
@@ -156,6 +206,7 @@ export function Painel({ navigation }) {
             <P style={{ textAlign: 'center' }}>{STATUS[status].desc}</P>
             <Metricas x={d} />
           </Card>
+          <CartaoMedicao lista={lista} />
           <H>O que dá para fazer</H>
           {ATIVIDADES.map((a) => (
             <Row key={a.nome} icon={a.icon} label={a.estimativa ? `${a.nome} (estimativa)` : a.nome} value={valorAtividade(a)} />
@@ -432,6 +483,7 @@ export function Privacidade() {
         <P>• Não coletamos dados pessoais.</P>
         <P>• Se você usar "minha localização", ela é usada só no celular para achar o ponto de medição mais próximo. A localização não é enviada para a API nem salva.</P>
         <P>• Para a API vão apenas o ponto de medição escolhido e o modelo de previsão.</P>
+        <P>• "Medir minha conexão agora" faz {AMOSTRAS} requisições vazias a um servidor de teste do Google só para cronometrar o tempo de resposta. Nenhum dado pessoal é enviado e o resultado fica só no celular.</P>
         <P>• A previsão é do ponto de medição da sua região, não uma medição do seu aparelho.</P>
         <P>• Usar VPN pode aumentar a latência: o caminho fica mais longo, mesmo sem defeito na rede.</P>
       </Card>
